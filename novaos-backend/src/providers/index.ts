@@ -5,18 +5,23 @@
 
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { Generation, GenerationConstraints } from '../types/index.js';
+import type { Generation, GenerationConstraints, ConversationMessage } from '../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PROVIDER INTERFACE
 // ─────────────────────────────────────────────────────────────────────────────────
+
+export interface GenerateOptions {
+  conversationHistory?: ConversationMessage[];
+}
 
 export interface ModelProvider {
   name: string;
   generate(
     prompt: string,
     systemPrompt: string,
-    constraints?: GenerationConstraints
+    constraints?: GenerationConstraints,
+    options?: GenerateOptions
   ): Promise<Generation>;
   isAvailable(): boolean;
 }
@@ -45,7 +50,8 @@ export class OpenAIProvider implements ModelProvider {
   async generate(
     prompt: string,
     systemPrompt: string,
-    constraints?: GenerationConstraints
+    constraints?: GenerationConstraints,
+    options?: GenerateOptions
   ): Promise<Generation> {
     if (!this.client) {
       throw new Error('OpenAI client not initialized');
@@ -53,12 +59,27 @@ export class OpenAIProvider implements ModelProvider {
 
     const fullSystemPrompt = this.buildSystemPrompt(systemPrompt, constraints);
 
+    // Build messages array with conversation history
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: fullSystemPrompt },
+    ];
+
+    // Add conversation history if provided
+    if (options?.conversationHistory?.length) {
+      for (const msg of options.conversationHistory) {
+        messages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: msg.content,
+        });
+      }
+    }
+
+    // Add current user message
+    messages.push({ role: 'user', content: prompt });
+
     const response = await this.client.chat.completions.create({
       model: this.model,
-      messages: [
-        { role: 'system', content: fullSystemPrompt },
-        { role: 'user', content: prompt },
-      ],
+      messages,
       max_tokens: 2048,
       temperature: 0.7,
     });
@@ -143,7 +164,8 @@ export class GeminiProvider implements ModelProvider {
   async generate(
     prompt: string,
     systemPrompt: string,
-    constraints?: GenerationConstraints
+    constraints?: GenerationConstraints,
+    options?: GenerateOptions
   ): Promise<Generation> {
     if (!this.client) {
       throw new Error('Gemini client not initialized');
@@ -155,12 +177,31 @@ export class GeminiProvider implements ModelProvider {
       systemInstruction: fullSystemPrompt,
     });
 
+    // Build chat history if provided
+    if (options?.conversationHistory?.length) {
+      const chat = model.startChat({
+        history: options.conversationHistory.map(msg => ({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }],
+        })),
+      });
+      const result = await chat.sendMessage(prompt);
+      const text = result.response.text();
+      const tokensUsed = Math.ceil(text.length / 4);
+      
+      return {
+        text: this.applyPostConstraints(text, constraints),
+        model: this.model,
+        tokensUsed,
+        constraints,
+      };
+    }
+
+    // No history, simple generate
     const result = await model.generateContent(prompt);
     const response = result.response;
     const text = response.text();
-
-    // Gemini doesn't provide token counts in the same way
-    const tokensUsed = Math.ceil(text.length / 4); // Rough estimate
+    const tokensUsed = Math.ceil(text.length / 4);
 
     return {
       text: this.applyPostConstraints(text, constraints),
@@ -225,7 +266,8 @@ export class MockProvider implements ModelProvider {
   async generate(
     prompt: string,
     _systemPrompt: string,
-    constraints?: GenerationConstraints
+    constraints?: GenerationConstraints,
+    _options?: GenerateOptions
   ): Promise<Generation> {
     // Generate contextual mock response
     let text = this.generateMockResponse(prompt);
@@ -308,7 +350,8 @@ export class ProviderManager {
   async generate(
     prompt: string,
     systemPrompt: string,
-    constraints?: GenerationConstraints
+    constraints?: GenerationConstraints,
+    options?: GenerateOptions
   ): Promise<Generation> {
     let lastError: Error | null = null;
 
@@ -317,7 +360,7 @@ export class ProviderManager {
 
       try {
         console.log(`[PROVIDERS] Attempting ${provider.name}...`);
-        const result = await provider.generate(prompt, systemPrompt, constraints);
+        const result = await provider.generate(prompt, systemPrompt, constraints, options);
         console.log(`[PROVIDERS] Success with ${provider.name}`);
         return result;
       } catch (error) {

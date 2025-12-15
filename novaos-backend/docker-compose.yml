@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOVAOS BACKEND — Docker Compose (Development)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # NOVAOS BACKEND
+  # ─────────────────────────────────────────────────────────────────────────────
+  novaos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - REQUIRE_AUTH=false
+      - DEBUG=true
+      - REDACT_PII=false
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # REDIS (Persistence Layer)
+  # ─────────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# Development:
+#   docker-compose up
+#
+# Production (with env file):
+#   docker-compose --env-file .env.production up -d
+#
+# Rebuild:
+#   docker-compose build --no-cache
+#
+# Logs:
+#   docker-compose logs -f novaos
+#
+# ═══════════════════════════════════════════════════════════════════════════════

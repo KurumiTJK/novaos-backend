@@ -1,6 +1,6 @@
 {
   "name": "novaos-backend",
-  "version": "3.0.0",
+  "version": "10.0.0",
   "description": "NovaOS - Enforcement-first AI kernel with Shield, Lens, and Sword",
   "type": "module",
   "main": "dist/server.js",

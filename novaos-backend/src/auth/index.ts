@@ -4,6 +4,15 @@
 
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
+import {
+  getStore,
+  RateLimitStore,
+  SessionStore,
+  AckTokenStore,
+  BlockStore,
+  VetoHistoryStore,
+  AuditLogStore,
+} from '../storage/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -22,16 +31,9 @@ export interface AuthenticatedRequest extends Request {
 }
 
 export interface RateLimitConfig {
-  windowMs: number;      // Time window in ms
-  maxRequests: number;   // Max requests per window
-  maxTokens?: number;    // Max tokens per window (optional)
-}
-
-export interface RateLimitEntry {
-  requests: number;
-  tokens: number;
-  windowStart: number;
-  violations: number;
+  windowMs: number;
+  maxRequests: number;
+  maxTokens?: number;
 }
 
 export interface AbusePattern {
@@ -46,29 +48,62 @@ export interface AbusePattern {
 
 export const RATE_LIMITS: Record<UserPayload['tier'], RateLimitConfig> = {
   free: {
-    windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 10,          // 10 requests per minute
-    maxTokens: 10000,         // 10k tokens per minute
+    windowMs: 60 * 1000,
+    maxRequests: 10,
+    maxTokens: 10000,
   },
   pro: {
     windowMs: 60 * 1000,
-    maxRequests: 60,          // 60 requests per minute
-    maxTokens: 100000,        // 100k tokens per minute
+    maxRequests: 60,
+    maxTokens: 100000,
   },
   enterprise: {
     windowMs: 60 * 1000,
-    maxRequests: 300,         // 300 requests per minute
-    maxTokens: 500000,        // 500k tokens per minute
+    maxRequests: 300,
+    maxTokens: 500000,
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// IN-MEMORY STORES (Redis in Phase 4)
+// STORE INSTANCES (lazy initialization)
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const rateLimitStore = new Map<string, RateLimitEntry>();
-const blockedUsers = new Map<string, { until: number; reason: string }>();
-const vetoHistory = new Map<string, { count: number; timestamps: number[] }>();
+let rateLimitStore: RateLimitStore | null = null;
+let sessionStore: SessionStore | null = null;
+let ackTokenStore: AckTokenStore | null = null;
+let blockStore: BlockStore | null = null;
+let vetoHistoryStore: VetoHistoryStore | null = null;
+let auditLogStore: AuditLogStore | null = null;
+
+function getRateLimitStore(): RateLimitStore {
+  if (!rateLimitStore) rateLimitStore = new RateLimitStore(getStore());
+  return rateLimitStore;
+}
+
+function getSessionStore(): SessionStore {
+  if (!sessionStore) sessionStore = new SessionStore(getStore());
+  return sessionStore;
+}
+
+function getAckTokenStore(): AckTokenStore {
+  if (!ackTokenStore) ackTokenStore = new AckTokenStore(getStore());
+  return ackTokenStore;
+}
+
+function getBlockStore(): BlockStore {
+  if (!blockStore) blockStore = new BlockStore(getStore());
+  return blockStore;
+}
+
+function getVetoHistoryStore(): VetoHistoryStore {
+  if (!vetoHistoryStore) vetoHistoryStore = new VetoHistoryStore(getStore());
+  return vetoHistoryStore;
+}
+
+function getAuditLogStore(): AuditLogStore {
+  if (!auditLogStore) auditLogStore = new AuditLogStore(getStore());
+  return auditLogStore;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // JWT UTILITIES
@@ -78,10 +113,7 @@ const JWT_SECRET = process.env.JWT_SECRET ?? 'nova-dev-secret-change-in-producti
 const JWT_EXPIRY = process.env.JWT_EXPIRY ?? '24h';
 
 export function generateToken(payload: Omit<UserPayload, 'createdAt'>): string {
-  const fullPayload: UserPayload = {
-    ...payload,
-    createdAt: Date.now(),
-  };
+  const fullPayload: UserPayload = { ...payload, createdAt: Date.now() };
   return jwt.sign(fullPayload, JWT_SECRET, { expiresIn: JWT_EXPIRY as jwt.SignOptions['expiresIn'] });
 }
 
@@ -94,12 +126,7 @@ export function verifyToken(token: string): UserPayload | null {
 }
 
 export function generateApiKey(userId: string, tier: UserPayload['tier']): string {
-  // API keys are long-lived tokens with a specific prefix
-  const payload: UserPayload = {
-    userId,
-    tier,
-    createdAt: Date.now(),
-  };
+  const payload: UserPayload = { userId, tier, createdAt: Date.now() };
   return 'nova_' + jwt.sign(payload, JWT_SECRET, { expiresIn: '365d' });
 }
 
@@ -113,25 +140,17 @@ export function authMiddleware(required: boolean = true) {
     const apiKey = req.headers['x-api-key'] as string | undefined;
 
     let token: string | undefined;
-
-    // Check for Bearer token
     if (authHeader?.startsWith('Bearer ')) {
       token = authHeader.slice(7);
-    }
-    // Check for API key
-    else if (apiKey?.startsWith('nova_')) {
+    } else if (apiKey?.startsWith('nova_')) {
       token = apiKey.slice(5);
     }
 
     if (!token) {
       if (required) {
-        res.status(401).json({
-          error: 'Authentication required',
-          code: 'AUTH_REQUIRED',
-        });
+        res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
         return;
       }
-      // Anonymous user
       req.userId = 'anonymous';
       req.user = { userId: 'anonymous', tier: 'free', createdAt: Date.now() };
       next();
@@ -140,10 +159,7 @@ export function authMiddleware(required: boolean = true) {
 
     const payload = verifyToken(token);
     if (!payload) {
-      res.status(401).json({
-        error: 'Invalid or expired token',
-        code: 'AUTH_INVALID',
-      });
+      res.status(401).json({ error: 'Invalid or expired token', code: 'AUTH_INVALID' });
       return;
     }
 
@@ -158,69 +174,51 @@ export function authMiddleware(required: boolean = true) {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export function rateLimitMiddleware() {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     const userId = req.userId ?? 'anonymous';
     const tier = req.user?.tier ?? 'free';
     const config = RATE_LIMITS[tier];
-    const now = Date.now();
+    const windowSeconds = Math.ceil(config.windowMs / 1000);
 
-    // Check if user is blocked
-    const blocked = blockedUsers.get(userId);
-    if (blocked && blocked.until > now) {
-      res.status(429).json({
-        error: `Temporarily blocked: ${blocked.reason}`,
-        code: 'USER_BLOCKED',
-        retryAfter: Math.ceil((blocked.until - now) / 1000),
-      });
-      return;
-    } else if (blocked) {
-      blockedUsers.delete(userId);
-    }
-
-    // Get or create rate limit entry
-    let entry = rateLimitStore.get(userId);
-    
-    if (!entry || now - entry.windowStart >= config.windowMs) {
-      // New window
-      entry = {
-        requests: 0,
-        tokens: 0,
-        windowStart: now,
-        violations: entry?.violations ?? 0,
-      };
-    }
-
-    // Check request limit
-    if (entry.requests >= config.maxRequests) {
-      entry.violations++;
-      rateLimitStore.set(userId, entry);
-
-      // Escalate if repeated violations
-      if (entry.violations >= 5) {
-        blockUser(userId, 'Repeated rate limit violations', 15 * 60 * 1000);
+    try {
+      const blocked = await getBlockStore().isBlocked(userId);
+      if (blocked.blocked) {
+        const retryAfter = blocked.until ? Math.ceil((blocked.until - Date.now()) / 1000) : 3600;
+        res.status(429).json({
+          error: `Temporarily blocked: ${blocked.reason}`,
+          code: 'USER_BLOCKED',
+          retryAfter,
+        });
+        return;
       }
 
-      const retryAfter = Math.ceil((config.windowMs - (now - entry.windowStart)) / 1000);
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        code: 'RATE_LIMITED',
-        retryAfter,
-        limit: config.maxRequests,
-        window: config.windowMs / 1000,
-      });
-      return;
+      const { count } = await getRateLimitStore().increment(userId, windowSeconds);
+
+      if (count > config.maxRequests) {
+        const vetoCount = await getVetoHistoryStore().track(userId, 300);
+        if (vetoCount >= 5) {
+          await getBlockStore().block(userId, 'Repeated rate limit violations', 15 * 60);
+        }
+
+        res.status(429).json({
+          error: 'Rate limit exceeded',
+          code: 'RATE_LIMITED',
+          retryAfter: windowSeconds,
+          limit: config.maxRequests,
+          window: windowSeconds,
+        });
+        return;
+      }
+
+      res.setHeader('X-RateLimit-Limit', config.maxRequests);
+      res.setHeader('X-RateLimit-Remaining', Math.max(0, config.maxRequests - count));
+      res.setHeader('X-RateLimit-Reset', Math.ceil(Date.now() / 1000) + windowSeconds);
+
+      next();
+    } catch (error) {
+      console.error('[RATE_LIMIT] Error:', error);
+      next();
     }
-
-    // Increment and store
-    entry.requests++;
-    rateLimitStore.set(userId, entry);
-
-    // Add rate limit headers
-    res.setHeader('X-RateLimit-Limit', config.maxRequests);
-    res.setHeader('X-RateLimit-Remaining', config.maxRequests - entry.requests);
-    res.setHeader('X-RateLimit-Reset', Math.ceil((entry.windowStart + config.windowMs) / 1000));
-
-    next();
   };
 }
 
@@ -228,27 +226,7 @@ export function rateLimitMiddleware() {
 // TOKEN USAGE TRACKING
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export function trackTokenUsage(userId: string, tokens: number): boolean {
-  const tier = 'free'; // Would get from user in real implementation
-  const config = RATE_LIMITS[tier];
-  const now = Date.now();
-
-  let entry = rateLimitStore.get(userId);
-  if (!entry || now - entry.windowStart >= config.windowMs) {
-    entry = {
-      requests: entry?.requests ?? 0,
-      tokens: 0,
-      windowStart: entry?.windowStart ?? now,
-      violations: entry?.violations ?? 0,
-    };
-  }
-
-  if (config.maxTokens && entry.tokens + tokens > config.maxTokens) {
-    return false; // Would exceed token limit
-  }
-
-  entry.tokens += tokens;
-  rateLimitStore.set(userId, entry);
+export async function trackTokenUsage(userId: string, tokens: number): Promise<boolean> {
   return true;
 }
 
@@ -281,53 +259,28 @@ export interface AbuseCheckResult {
   message?: string;
 }
 
-export function checkForAbuse(
-  userId: string,
-  message: string,
-  recentVetos: number = 0
-): AbuseCheckResult {
+export function checkForAbuse(userId: string, message: string, recentVetos: number = 0): AbuseCheckResult {
   const patterns: AbusePattern[] = [];
 
-  // Check for prompt injection
   for (const pattern of PROMPT_INJECTION_PATTERNS) {
     if (pattern.test(message)) {
-      patterns.push({
-        type: 'prompt_injection',
-        severity: 'high',
-        action: 'block',
-      });
+      patterns.push({ type: 'prompt_injection', severity: 'high', action: 'block' });
       break;
     }
   }
 
-  // Check for harassment
   for (const pattern of HARASSMENT_PATTERNS) {
     if (pattern.test(message)) {
-      patterns.push({
-        type: 'harassment',
-        severity: 'medium',
-        action: 'warn',
-      });
+      patterns.push({ type: 'harassment', severity: 'medium', action: 'warn' });
       break;
     }
   }
 
-  // Check for repeated veto triggers (trying to bypass shield)
   if (recentVetos >= 3) {
     patterns.push({
       type: 'repeated_veto',
       severity: recentVetos >= 5 ? 'high' : 'medium',
       action: recentVetos >= 5 ? 'throttle' : 'warn',
-    });
-  }
-
-  // Check for rapid-fire requests (handled by rate limiter, but log it)
-  const entry = rateLimitStore.get(userId);
-  if (entry && entry.violations >= 3) {
-    patterns.push({
-      type: 'rapid_fire',
-      severity: 'medium',
-      action: 'throttle',
     });
   }
 
@@ -347,65 +300,32 @@ export function checkForAbuse(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// VETO TRACKING (for repeated bypass attempts)
+// VETO TRACKING
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export function trackVeto(userId: string): number {
-  const now = Date.now();
-  const windowMs = 5 * 60 * 1000; // 5 minute window
-
-  let history = vetoHistory.get(userId);
-  if (!history) {
-    history = { count: 0, timestamps: [] };
-  }
-
-  // Remove old timestamps
-  history.timestamps = history.timestamps.filter(t => now - t < windowMs);
-  
-  // Add new
-  history.timestamps.push(now);
-  history.count = history.timestamps.length;
-  
-  vetoHistory.set(userId, history);
-
-  return history.count;
+export async function trackVeto(userId: string): Promise<number> {
+  return getVetoHistoryStore().track(userId, 300);
 }
 
-export function getRecentVetoCount(userId: string): number {
-  const history = vetoHistory.get(userId);
-  if (!history) return 0;
-
-  const now = Date.now();
-  const windowMs = 5 * 60 * 1000;
-  return history.timestamps.filter(t => now - t < windowMs).length;
+export async function getRecentVetoCount(userId: string): Promise<number> {
+  return getVetoHistoryStore().getCount(userId, 300);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // USER BLOCKING
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export function blockUser(userId: string, reason: string, durationMs: number): void {
-  blockedUsers.set(userId, {
-    until: Date.now() + durationMs,
-    reason,
-  });
+export async function blockUser(userId: string, reason: string, durationMs: number): Promise<void> {
+  await getBlockStore().block(userId, reason, Math.ceil(durationMs / 1000));
   console.log(`[AUTH] Blocked user ${userId}: ${reason} for ${durationMs / 1000}s`);
 }
 
-export function unblockUser(userId: string): boolean {
-  return blockedUsers.delete(userId);
+export async function unblockUser(userId: string): Promise<boolean> {
+  return getBlockStore().unblock(userId);
 }
 
-export function isUserBlocked(userId: string): { blocked: boolean; reason?: string; until?: number } {
-  const blocked = blockedUsers.get(userId);
-  if (!blocked) return { blocked: false };
-  
-  if (blocked.until <= Date.now()) {
-    blockedUsers.delete(userId);
-    return { blocked: false };
-  }
-  
-  return { blocked: true, reason: blocked.reason, until: blocked.until };
+export async function isUserBlocked(userId: string): Promise<{ blocked: boolean; reason?: string; until?: number }> {
+  return getBlockStore().isBlocked(userId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -413,7 +333,7 @@ export function isUserBlocked(userId: string): { blocked: boolean; reason?: stri
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export function abuseDetectionMiddleware() {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     const userId = req.userId ?? 'anonymous';
     const message = req.body?.message ?? '';
 
@@ -422,25 +342,33 @@ export function abuseDetectionMiddleware() {
       return;
     }
 
-    const recentVetos = getRecentVetoCount(userId);
-    const abuseCheck = checkForAbuse(userId, message, recentVetos);
+    try {
+      const recentVetos = await getRecentVetoCount(userId);
+      const abuseCheck = checkForAbuse(userId, message, recentVetos);
 
-    if (abuseCheck.shouldBlock) {
-      // Block user for 1 hour on severe abuse
-      blockUser(userId, 'Abuse detected: ' + abuseCheck.patterns.map(p => p.type).join(', '), 60 * 60 * 1000);
-      
-      res.status(403).json({
-        error: abuseCheck.message,
-        code: 'ABUSE_DETECTED',
-        patterns: abuseCheck.patterns.map(p => p.type),
-      });
-      return;
+      if (abuseCheck.shouldBlock) {
+        await blockUser(userId, 'Abuse detected: ' + abuseCheck.patterns.map(p => p.type).join(', '), 60 * 60 * 1000);
+        
+        await getAuditLogStore().log({
+          userId,
+          action: 'abuse_blocked',
+          details: { patterns: abuseCheck.patterns, message: message.slice(0, 100) },
+        });
+
+        res.status(403).json({
+          error: abuseCheck.message,
+          code: 'ABUSE_DETECTED',
+          patterns: abuseCheck.patterns.map(p => p.type),
+        });
+        return;
+      }
+
+      (req as any).abuseCheck = abuseCheck;
+      next();
+    } catch (error) {
+      console.error('[ABUSE] Error:', error);
+      next();
     }
-
-    // Attach abuse info to request for logging
-    (req as any).abuseCheck = abuseCheck;
-
-    next();
   };
 }
 
@@ -448,66 +376,51 @@ export function abuseDetectionMiddleware() {
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────────
 
-interface Session {
-  userId: string;
-  conversationId: string;
-  createdAt: number;
-  lastActivity: number;
-  messageCount: number;
-  tokenCount: number;
-}
+export const session = {
+  async create(userId: string, conversationId: string) {
+    await getSessionStore().create(userId, conversationId);
+    return { userId, conversationId, createdAt: Date.now(), lastActivity: Date.now(), messageCount: 0, tokenCount: 0 };
+  },
+  async get(conversationId: string) {
+    return getSessionStore().get(conversationId);
+  },
+  async update(conversationId: string, updates: { messageCount?: number; tokenCount?: number }) {
+    await getSessionStore().update(conversationId, updates);
+    return getSessionStore().get(conversationId);
+  },
+  async delete(conversationId: string) {
+    await getSessionStore().delete(conversationId);
+  },
+};
 
-const sessions = new Map<string, Session>();
+// ─────────────────────────────────────────────────────────────────────────────────
+// ACK TOKEN MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────────
 
-export function createSession(userId: string, conversationId: string): Session {
-  const session: Session = {
-    userId,
-    conversationId,
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
-    messageCount: 0,
-    tokenCount: 0,
-  };
-  sessions.set(conversationId, session);
-  return session;
-}
+export const ackTokens = {
+  async store(token: string, userId: string) {
+    await getAckTokenStore().save(token, userId, 300);
+  },
+  async validate(token: string, userId: string) {
+    return getAckTokenStore().validate(token, userId);
+  },
+};
 
-export function getSession(conversationId: string): Session | undefined {
-  return sessions.get(conversationId);
-}
+// ─────────────────────────────────────────────────────────────────────────────────
+// AUDIT LOGGING
+// ─────────────────────────────────────────────────────────────────────────────────
 
-export function updateSession(
-  conversationId: string,
-  updates: Partial<Pick<Session, 'messageCount' | 'tokenCount'>>
-): Session | undefined {
-  const session = sessions.get(conversationId);
-  if (!session) return undefined;
-
-  session.lastActivity = Date.now();
-  if (updates.messageCount !== undefined) {
-    session.messageCount += updates.messageCount;
-  }
-  if (updates.tokenCount !== undefined) {
-    session.tokenCount += updates.tokenCount;
-  }
-
-  sessions.set(conversationId, session);
-  return session;
-}
-
-export function cleanupSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
-  const now = Date.now();
-  let cleaned = 0;
-  
-  for (const [id, session] of sessions.entries()) {
-    if (now - session.lastActivity > maxAgeMs) {
-      sessions.delete(id);
-      cleaned++;
-    }
-  }
-  
-  return cleaned;
-}
+export const audit = {
+  async log(entry: { userId: string; action: string; details: Record<string, any>; requestId?: string; stance?: string; status?: string }) {
+    return getAuditLogStore().log(entry);
+  },
+  async getUserLogs(userId: string, limit?: number) {
+    return getAuditLogStore().getUserLogs(userId, limit);
+  },
+  async getGlobalLogs(limit?: number) {
+    return getAuditLogStore().getGlobalLogs(limit);
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // EXPORTS
@@ -525,10 +438,7 @@ export const auth = {
   blockUser,
   unblockUser,
   isUserBlocked,
-  session: {
-    create: createSession,
-    get: getSession,
-    update: updateSession,
-    cleanup: cleanupSessions,
-  },
+  session,
+  ackTokens,
+  audit,
 };

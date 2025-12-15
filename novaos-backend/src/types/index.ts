@@ -47,6 +47,11 @@ export interface ActionSource {
 // PIPELINE CONTEXT
 // ─────────────────────────────────────────────────────────────────────────────────
 
+export interface ConversationMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
 export interface PipelineContext {
   userId: string;
   conversationId: string;
@@ -56,6 +61,7 @@ export interface PipelineContext {
   timezone?: string;
   locale?: string;
   ackTokenValid?: boolean;
+  conversationHistory?: ConversationMessage[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

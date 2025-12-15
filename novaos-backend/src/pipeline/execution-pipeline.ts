@@ -183,7 +183,9 @@ export class ExecutionPipeline {
           state,
           context,
           (prompt, systemPrompt, constraints) => 
-            this.providerManager!.generate(prompt, systemPrompt, constraints),
+            this.providerManager!.generate(prompt, systemPrompt, constraints, {
+              conversationHistory: context.conversationHistory,
+            }),
           this.systemPrompt
         );
       }
