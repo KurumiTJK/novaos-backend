@@ -1,0 +1,474 @@
+```mermaid
+---
+title: NovaOS v4 — Execution Pipeline Architecture
+---
+
+flowchart TB
+    subgraph Input["INPUT LAYER"]
+        UI[User Interface]
+        API[API Endpoint]
+        CMD[Command Parser]
+    end
+
+    subgraph Sources["ACTION SOURCES (Explicit Only)"]
+        UI -->|"source: ui_button"| Actions
+        API -->|"source: api_field"| Actions
+        CMD -->|"source: command_parser"| Actions
+        Actions[RequestedActions]
+    end
+
+    subgraph Pipeline["EXECUTION PIPELINE"]
+        direction TB
+        
+        subgraph IntentGate["INTENT GATE"]
+            IG_In[Input] --> IG_Classify[Classify Intent]
+            IG_Classify --> IG_Out[Intent]
+            IG_Fail[Hard Fail: Unparseable] -.-> Stop1[STOP]
+        end
+
+        subgraph ShieldGate["SHIELD GATE ⚔️"]
+            SG_In[Intent] --> SG_Risk[Assess Risk]
+            SG_Risk --> SG_Check{Veto?}
+            SG_Check -->|Hard| SG_HardVeto[Hard Veto]
+            SG_Check -->|Soft| SG_SoftVeto[Soft Veto]
+            SG_Check -->|No| SG_Pass[Pass]
+            SG_HardVeto --> Stop2[STOP]
+            SG_SoftVeto --> AwaitAck[AWAIT_ACK]
+            SG_Pass --> SG_Control{Control Trigger?}
+            SG_Control -->|Yes| SG_Resources[Mark: requiredPrependResources]
+            SG_Control -->|No| SG_Out[RiskSummary]
+            SG_Resources --> SG_Out
+        end
+
+        subgraph LensGate["LENS GATE 🔍"]
+            LG_In[RiskSummary] --> LG_Check[Check Verification Required]
+            LG_Check --> LG_Triggers{Triggers?}
+            LG_Triggers -->|None| LG_Skip[Skip Verification]
+            LG_Triggers -->|Required| LG_CanVerify{Can Verify?}
+            LG_CanVerify -->|Yes| LG_Verify[Execute Verification]
+            LG_CanVerify -->|No| LG_Stakes{Stakes Level?}
+            LG_Stakes -->|High/Critical| LG_Options[Return User Options]
+            LG_Stakes -->|Low/Medium| LG_Degrade[Degrade]
+            LG_Options --> Stop3[STOP]
+            LG_Degrade --> LG_Restrict[No Numerics, No Actions]
+            LG_Skip --> LG_Out[VerificationPlan]
+            LG_Verify --> LG_Out
+            LG_Restrict --> LG_Out
+        end
+
+        subgraph StanceGate["STANCE GATE"]
+            STG_In[VerificationPlan] --> STG_Select[Select Stance]
+            STG_Select --> STG_Out[Stance]
+        end
+
+        subgraph CapabilityGate["CAPABILITY GATE"]
+            CG_In[Stance] --> CG_Check[Check Actions vs Matrix]
+            CG_Check --> CG_Blocked{Blocked?}
+            CG_Blocked -->|Yes| Stop4[STOP]
+            CG_Blocked -->|No| CG_Out[CapabilityCheckResult]
+        end
+
+        subgraph ModelGate["MODEL GATE 🤖"]
+            MG_In[CapabilityCheckResult] --> MG_Constraints[Build Constraints]
+            MG_Constraints --> MG_Generate[Generate Response]
+            MG_Generate --> MG_Out[GenerationResult]
+            MG_Fail[Hard Fail: All Models Down] -.-> Stop5[STOP]
+        end
+
+        subgraph PersonalityGate["PERSONALITY GATE"]
+            PG_In[GenerationResult] --> PG_Validate[Validate Output]
+            PG_Validate --> PG_Severity{Violations?}
+            PG_Severity -->|High| PG_Regen[REGENERATE]
+            PG_Severity -->|Low/Med| PG_Edit[Surgical Edit]
+            PG_Severity -->|None| PG_Out[ValidatedOutput]
+            PG_Edit --> PG_Out
+            PG_Regen --> MG_In
+        end
+
+        subgraph SparkGate["SPARK GATE ⚡"]
+            SPG_In[ValidatedOutput] --> SPG_Check{Stance = Sword?}
+            SPG_Check -->|No| SPG_NoSpark[spark: null]
+            SPG_Check -->|Yes| SPG_Eligible{Eligible?}
+            SPG_Eligible -->|No| SPG_NoSpark
+            SPG_Eligible -->|Yes| SPG_Generate[Generate Spark]
+            SPG_NoSpark --> SPG_Out[SparkDecision]
+            SPG_Generate --> SPG_Out
+        end
+
+        IntentGate --> ShieldGate
+        ShieldGate --> LensGate
+        LensGate --> StanceGate
+        StanceGate --> CapabilityGate
+        CapabilityGate --> ModelGate
+        ModelGate --> PersonalityGate
+        PersonalityGate --> SparkGate
+    end
+
+    subgraph Output["OUTPUT LAYER"]
+        SPG_Out --> Response[Build Response]
+        Response --> Audit[Audit Logger]
+        Response --> Invariants[Invariant Checker]
+        Invariants --> UI_Out[User Interface]
+    end
+
+    subgraph AckFlow["SOFT VETO ACKNOWLEDGMENT FLOW"]
+        AwaitAck --> AckUI[Show Ack Dialog]
+        AckUI --> UserTypes[User Types Exact Phrase]
+        UserTypes --> VerifyToken[Verify ackToken + Text]
+        VerifyToken --> LogOverride[Log Override]
+        LogOverride --> SG_Pass
+    end
+
+    subgraph Constraints["GENERATION CONSTRAINTS"]
+        C1[bannedPhrases]
+        C2[maxWe]
+        C3[numericPrecisionAllowed]
+        C4[actionRecommendationsAllowed]
+        C5[mustInclude]
+        C6[mustNotInclude]
+        C7[mustPrepend]
+    end
+
+    subgraph Invariants_List["INVARIANTS (Must Never Break)"]
+        I1["hard_veto_stops"]
+        I2["sword_only_spark"]
+        I3["lens_degradation"]
+        I4["control_resources"]
+        I5["regeneration_limit"]
+        I6["soft_veto_ack"]
+        I7["no_nl_actions"]
+        I8["immediate_domain_numerics"]
+    end
+
+    UI --> Input
+    Actions --> Pipeline
+
+    classDef gate fill:#f5f5f0,stroke:#333,stroke-width:2px
+    classDef stop fill:#a35a5a,stroke:#333,color:#fff
+    classDef await fill:#9a8a5a,stroke:#333,color:#fff
+    classDef pass fill:#7a9a6b,stroke:#333,color:#fff
+
+    class IntentGate,ShieldGate,LensGate,StanceGate,CapabilityGate,ModelGate,PersonalityGate,SparkGate gate
+    class Stop1,Stop2,Stop3,Stop4,Stop5 stop
+    class AwaitAck await
+```
+
+```mermaid
+---
+title: NovaOS v4 — Type Ownership & Data Flow
+---
+
+flowchart LR
+    subgraph Types["TYPED PIPELINE STATE"]
+        direction TB
+        PS[PipelineState]
+        PS --> T1[input: UserInput]
+        PS --> T2[intent?: Intent]
+        PS --> T3[risk?: RiskSummary]
+        PS --> T4[verification?: VerificationPlan]
+        PS --> T5[stance?: Stance]
+        PS --> T6[capabilities?: CapabilityCheckResult]
+        PS --> T7[generation?: GenerationResult]
+        PS --> T8[validated?: ValidatedOutput]
+        PS --> T9[spark?: SparkDecision]
+        PS --> T10[regenerationCount: number]
+        PS --> T11[degraded: boolean]
+        PS --> T12[stoppedAt?: GateId]
+    end
+
+    subgraph Gates["GATE → STATE FIELD MAPPING"]
+        direction TB
+        G1[IntentGate] -->|writes| T2
+        G2[ShieldGate] -->|writes| T3
+        G3[LensGate] -->|writes| T4
+        G4[StanceGate] -->|writes| T5
+        G5[CapabilityGate] -->|writes| T6
+        G6[ModelGate] -->|writes| T7
+        G7[PersonalityGate] -->|writes| T8
+        G8[SparkGate] -->|writes| T9
+    end
+
+    subgraph Ownership["SINGLE-WRITER OWNERSHIP"]
+        direction TB
+        O1["Shield OWNS:
+        • Risk assessment
+        • Veto decisions
+        • Control triggers
+        • Crisis resources flag"]
+        
+        O2["Lens OWNS:
+        • Verification policy
+        • Confidence calibration
+        • Freshness checks
+        • Stakes assessment"]
+        
+        O3["Router/Stance OWNS:
+        • Stance selection
+        • Model selection"]
+        
+        O4["Capability OWNS:
+        • Action allow/deny
+        • (NO content injection)"]
+        
+        O5["Model OWNS:
+        • Response generation
+        • Constraint compilation
+        • Resource prepending"]
+        
+        O6["Personality OWNS:
+        • Linguistic validation
+        • Regeneration triggers"]
+        
+        O7["Spark OWNS:
+        • Spark eligibility
+        • (Only if stance=sword)"]
+    end
+
+    Types --> Gates
+    Gates --> Ownership
+```
+
+```mermaid
+---
+title: NovaOS v4 — Veto Decision Tree
+---
+
+flowchart TB
+    Start[User Request] --> Assess[Shield: Assess Risk]
+    
+    Assess --> VetoCheck{Veto Required?}
+    
+    VetoCheck -->|No| Continue[Continue Pipeline]
+    VetoCheck -->|Yes| VetoType{Veto Type?}
+    
+    VetoType -->|Hard| HardVeto[Hard Veto]
+    VetoType -->|Soft| SoftVeto[Soft Veto]
+    
+    HardVeto --> HardReasons["Triggers:
+    • illegal_content
+    • child_safety
+    • violence_promotion
+    • self_harm_instructions
+    • weapons_creation"]
+    HardReasons --> HardAction[Action: STOP]
+    HardAction --> HardUI[UI: Show Hard Veto Card]
+    HardUI --> HardEnd[Cannot Proceed]
+    
+    SoftVeto --> SoftReasons["Triggers:
+    • high_financial_risk
+    • health_without_professional
+    • legal_without_counsel
+    • irreversible_decision"]
+    SoftReasons --> SoftAction[Action: AWAIT_ACK]
+    SoftAction --> GenerateToken[Generate ackToken]
+    GenerateToken --> SoftUI[UI: Show Ack Dialog]
+    
+    SoftUI --> UserChoice{User Choice}
+    UserChoice -->|Cancel| End1[Request Cancelled]
+    UserChoice -->|Proceed| TypePhrase[Type Exact Phrase]
+    
+    TypePhrase --> Validate{Valid?}
+    Validate -->|No| TypePhrase
+    Validate -->|Yes| LogOverride[Log Override + auditId]
+    LogOverride --> Continue
+    
+    Continue --> Rest[Rest of Pipeline...]
+    
+    classDef hard fill:#a35a5a,stroke:#333,color:#fff
+    classDef soft fill:#c4785a,stroke:#333,color:#fff
+    classDef pass fill:#7a9a6b,stroke:#333,color:#fff
+    
+    class HardVeto,HardAction,HardEnd hard
+    class SoftVeto,SoftAction,SoftUI soft
+    class Continue,Rest pass
+```
+
+```mermaid
+---
+title: NovaOS v4 — Verification Stakes Matrix
+---
+
+flowchart TB
+    subgraph Triggers["VERIFICATION TRIGGERS"]
+        T1["Temporal: 'latest', 'current', 'today'"]
+        T2["Health: diagnosis, treatment, medication"]
+        T3["Legal: law, regulation, statute"]
+        T4["Financial: price, rate, stock, investment"]
+        T5["Numeric: percentages, dollar amounts"]
+        T6["Public Figure: claims about people"]
+    end
+
+    subgraph Allowlist["ALLOWLIST (Skip Verification)"]
+        A1["Code blocks"]
+        A2["User content processing (rewrite/summarize)"]
+        A3["Hypotheticals"]
+    end
+
+    Triggers --> Check{Allowlisted?}
+    Allowlist --> Check
+    
+    Check -->|Yes| Skip[Skip Verification]
+    Check -->|No| CanVerify{Web Available?}
+    
+    CanVerify -->|Yes| Verify[Execute Verification]
+    CanVerify -->|No| Stakes{Stakes Level?}
+    
+    Stakes -->|Low| DegradeLow["Degrade:
+    • confidence: low
+    • verified: false
+    • numericPrecision: false
+    • actionRecommendations: false"]
+    
+    Stakes -->|Medium| DegradeMed["Degrade:
+    • confidence: low
+    • verified: false
+    • numericPrecision: false
+    • actionRecommendations: false"]
+    
+    Stakes -->|High/Critical| StopOptions["STOP with Options:
+    • Enable web access
+    • Provide source URL
+    • Proceed unverified (requires ack)
+    • Cancel request"]
+    
+    subgraph ImmediateDomains["IMMEDIATE DOMAINS (Extra Strict)"]
+        ID1["stock_prices (15min)"]
+        ID2["crypto_prices (5min)"]
+        ID3["weather (1hr)"]
+        ID4["breaking_news (4hr)"]
+    end
+    
+    ImmediateDomains --> ExtraRule["If unverified:
+    NO precise numbers
+    NO buy/sell/invest recommendations
+    MUST include 'verify with broker'"]
+    
+    Verify --> Pass[Continue with verified: true]
+    Skip --> Pass
+    DegradeLow --> Continue[Continue degraded]
+    DegradeMed --> Continue
+    
+    classDef stop fill:#a35a5a,stroke:#333,color:#fff
+    classDef degrade fill:#9a8a5a,stroke:#333,color:#fff
+    classDef pass fill:#7a9a6b,stroke:#333,color:#fff
+    
+    class StopOptions stop
+    class DegradeLow,DegradeMed,Continue degrade
+    class Pass,Verify pass
+```
+
+```mermaid
+---
+title: NovaOS v4 — Regeneration Flow
+---
+
+flowchart TB
+    Model[ModelGate: Generate] --> Personality[PersonalityGate: Validate]
+    
+    Personality --> Check{Violations?}
+    
+    Check -->|None| Pass[Pass to SparkGate]
+    Check -->|Low/Med| Edit[Surgical Edit]
+    Check -->|High| Severity{Severity Check}
+    
+    Edit --> Pass
+    
+    Severity --> Count{regenerationCount < 2?}
+    
+    Count -->|Yes| BuildConstraints["Build Regeneration Constraints:
+    • Add violated phrases to bannedPhrases
+    • Set maxWe: 0 if 'we' was problem
+    • Carry forward existing constraints"]
+    
+    BuildConstraints --> Increment[regenerationCount++]
+    Increment --> Model
+    
+    Count -->|No| Degrade["Degrade Response:
+    • degraded: true
+    • Use last generation
+    • Log max_regenerations"]
+    
+    Degrade --> Pass
+    
+    subgraph HighSeverityViolations["HIGH SEVERITY (Trigger Regeneration)"]
+        H1["dependency_language"]
+        H2["emotional_manipulation"]
+        H3["excessive_praise_without_action"]
+    end
+    
+    subgraph LowMedViolations["LOW/MED SEVERITY (Surgical Edit)"]
+        L1["excessive_we (>2 per response)"]
+        L2["banned_phrase_minor"]
+    end
+    
+    classDef regen fill:#5a8fa3,stroke:#333,color:#fff
+    classDef degrade fill:#9a8a5a,stroke:#333,color:#fff
+    classDef pass fill:#7a9a6b,stroke:#333,color:#fff
+    
+    class BuildConstraints,Increment,Model regen
+    class Degrade degrade
+    class Pass,Edit pass
+```
+
+```mermaid
+---
+title: NovaOS v4 — Audit Trail
+---
+
+flowchart LR
+    subgraph Request["REQUEST"]
+        R1[requestId]
+        R2[userId]
+        R3[timestamp]
+        R4[inputHash]
+    end
+
+    subgraph PolicyVersions["POLICY VERSIONS"]
+        P1[policyVersion: 4.0.0]
+        P2[capabilityMatrixVersion: 4.0.0]
+        P3[constraintsVersion: 4.0.0]
+        P4[verificationPolicyVersion: 4.0.0]
+        P5[freshnessPolicyVersion: 4.0.0]
+    end
+
+    subgraph GateAudit["GATE EXECUTION"]
+        G1["intent: pass, 15ms"]
+        G2["shield: soft_fail, 42ms"]
+        G3["lens: pass, 1250ms"]
+        G4["stance: pass, 3ms"]
+        G5["capability: pass, 2ms"]
+        G6["model: pass, 1890ms"]
+        G7["personality: soft_fail, 24ms"]
+        G8["spark: pass, 12ms"]
+    end
+
+    subgraph Decisions["DECISIONS"]
+        D1[stance: sword]
+        D2[model: claude-3-opus]
+        D3[interventionApplied: nudge]
+        D4[ackOverrideApplied: false]
+    end
+
+    subgraph Outcome["OUTCOME"]
+        O1[responseGenerated: true]
+        O2[regenerationCount: 1]
+        O3[degradationApplied: false]
+        O4[outputHash]
+    end
+
+    subgraph Storage["STORAGE"]
+        S1["snapshotStorageRef (encrypted)"]
+        S2["redactionApplied: true"]
+        S3["PII patterns removed:
+        • SSN → [SSN]
+        • Cards → [CARD]
+        • Email → [EMAIL]
+        • Phone → [PHONE]"]
+    end
+
+    Request --> PolicyVersions
+    PolicyVersions --> GateAudit
+    GateAudit --> Decisions
+    Decisions --> Outcome
+    Outcome --> Storage
+```
