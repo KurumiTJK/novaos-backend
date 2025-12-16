@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { createHash, createHmac, randomUUID, timingSafeEqual as cryptoTimingSafeEqual } from 'crypto';
-import { UserInput } from './types';
+import { UserInput } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -260,6 +260,11 @@ export async function validateAckToken(
   
   const [version, payloadStr, signature] = parts;
   
+  // Ensure all parts are defined (TypeScript can't infer from length check)
+  if (!version || !payloadStr || !signature) {
+    return { valid: false, reason: 'Invalid token format' };
+  }
+
   if (version !== TOKEN_VERSION) {
     return { valid: false, reason: 'Invalid token version' };
   }

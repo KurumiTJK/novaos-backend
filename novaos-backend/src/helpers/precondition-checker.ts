@@ -3,7 +3,7 @@
 // Implements missing checkPrecondition that would cause silent failures
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { PipelineState } from './types';
+import { PipelineState } from './types.js';
 
 /**
  * Known preconditions that can be checked.

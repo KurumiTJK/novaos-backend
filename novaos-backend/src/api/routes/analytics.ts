@@ -3,15 +3,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, type Request, type Response } from 'express';
-import { getEventCollector } from '../analytics/collector.js';
-import { getMetricsAggregator } from '../analytics/aggregator.js';
-import { getDashboardService } from '../analytics/dashboard.js';
+import { getEventCollector } from '../../analytics/collector.js';
+import { getMetricsAggregator } from '../../analytics/aggregator.js';
+import { getDashboardService } from '../../analytics/dashboard.js';
 import type {
   TimePeriod,
   TimeGranularity,
   AnalyticsEventType,
-} from '../analytics/types.js';
-import { getLogger } from '../logging/index.js';
+} from '../../analytics/types.js';
+import { getLogger } from '../../logging/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SETUP
@@ -69,13 +69,14 @@ export function createAnalyticsRouter(): Router {
   /**
    * Track an analytics event.
    */
-  router.post('/events', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/events', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const { type, properties, sessionId, deviceType, platform, version } = req.body;
       
       if (!type) {
-        return res.status(400).json({ error: 'type is required' });
+        res.status(400).json({ error: 'type is required' });
+        return;
       }
       
       const event = collector.track(
@@ -95,13 +96,14 @@ export function createAnalyticsRouter(): Router {
   /**
    * Track multiple events (batch).
    */
-  router.post('/events/batch', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/events/batch', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const { events } = req.body;
       
       if (!Array.isArray(events)) {
-        return res.status(400).json({ error: 'events must be an array' });
+        res.status(400).json({ error: 'events must be an array' });
+        return;
       }
       
       const tracked = events.map(evt => 
@@ -126,10 +128,10 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get user events for a date.
    */
-  router.get('/events', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/events', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const date = req.query.date as string || new Date().toISOString().slice(0, 10);
+      const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
       const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
       
       const events = await collector.getUserEvents(userId, date, limit);
@@ -152,10 +154,10 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get user activity metrics.
    */
-  router.get('/me/activity', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/me/activity', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const period = validatePeriod(req.query.period as string || 'day');
+      const period = validatePeriod((req.query.period as string) || 'day');
       
       const metrics = await aggregator.computeUserActivityMetrics(userId, period);
       
@@ -170,7 +172,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get user activity summary (lifetime).
    */
-  router.get('/me/summary', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/me/summary', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       
@@ -189,7 +191,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get user insights.
    */
-  router.get('/me/insights', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/me/insights', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
@@ -209,7 +211,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Generate fresh insights for user.
    */
-  router.post('/me/insights/generate', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/me/insights/generate', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       
@@ -232,14 +234,14 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get user's personalized dashboard.
    */
-  router.get('/me/dashboard', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/me/dashboard', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const period = validatePeriod(req.query.period as string || 'day');
+      const period = validatePeriod((req.query.period as string) || 'week');
       
-      const result = await dashboard.getUserDashboard(userId, period);
+      const dashboardData = await dashboard.getUserDashboard(userId, period);
       
-      res.json(result);
+      res.json({ dashboard: dashboardData });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get dashboard';
       logger.error('Failed to get user dashboard', error instanceof Error ? error : new Error(message));
@@ -248,16 +250,16 @@ export function createAnalyticsRouter(): Router {
   });
   
   /**
-   * Compare current period with previous.
+   * Compare user metrics across periods.
    */
-  router.get('/me/compare', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/me/compare', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const period = validatePeriod(req.query.period as string || 'week');
+      const period = validatePeriod((req.query.period as string) || 'week');
       
       const comparison = await dashboard.compareMetrics(userId, period);
       
-      res.json(comparison);
+      res.json({ comparison });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to compare';
       logger.error('Failed to compare metrics', error instanceof Error ? error : new Error(message));
@@ -268,10 +270,10 @@ export function createAnalyticsRouter(): Router {
   /**
    * Export metrics as CSV.
    */
-  router.get('/me/export', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/me/export', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const period = validatePeriod(req.query.period as string || 'month');
+      const period = validatePeriod((req.query.period as string) || 'month');
       
       const now = new Date();
       const start = new Date(now);
@@ -314,11 +316,17 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get time series data for a metric.
    */
-  router.get('/timeseries/:metric', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/timeseries/:metric', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { metric } = req.params;
-      const granularity = validateGranularity(req.query.granularity as string || 'hour');
+      const metric = req.params.metric;
+      
+      if (!metric) {
+        res.status(400).json({ error: 'metric parameter is required' });
+        return;
+      }
+      
+      const granularity = validateGranularity((req.query.granularity as string) || 'hour');
       const days = Math.min(parseInt(req.query.days as string) || 7, 90);
       
       const end = new Date();
@@ -346,7 +354,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get spark completion funnel.
    */
-  router.get('/funnels/spark', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/funnels/spark', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const days = Math.min(parseInt(req.query.days as string) || 7, 90);
       
@@ -365,7 +373,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get goal achievement funnel.
    */
-  router.get('/funnels/goal', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/funnels/goal', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
       
@@ -388,9 +396,9 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get global dashboard metrics.
    */
-  router.get('/dashboard', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/dashboard', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-      const period = validatePeriod(req.query.period as string || 'day');
+      const period = validatePeriod((req.query.period as string) || 'day');
       
       const metrics = await dashboard.getDashboardMetrics(period);
       
@@ -405,9 +413,9 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get completion metrics.
    */
-  router.get('/completion', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/completion', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-      const period = validatePeriod(req.query.period as string || 'day');
+      const period = validatePeriod((req.query.period as string) || 'day');
       
       const metrics = await aggregator.computeCompletionMetrics(period);
       
@@ -422,7 +430,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get active users count.
    */
-  router.get('/active-users', async (_req: Request, res: Response) => {
+  router.get('/active-users', async (_req: Request, res: Response): Promise<void> => {
     try {
       const count = await dashboard.getActiveUsersCount();
       
@@ -440,10 +448,16 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get leaderboard.
    */
-  router.get('/leaderboards/:name', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/leaderboards/:name', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-      const { name } = req.params;
-      const period = validatePeriod(req.query.period as string || 'week');
+      const name = req.params.name;
+      
+      if (!name) {
+        res.status(400).json({ error: 'name parameter is required' });
+        return;
+      }
+      
+      const period = validatePeriod((req.query.period as string) || 'week');
       const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
       
       const leaderboard = await dashboard.getLeaderboard(name, period, limit);
@@ -459,11 +473,17 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get user's rank on leaderboard.
    */
-  router.get('/leaderboards/:name/me', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/leaderboards/:name/me', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { name } = req.params;
-      const period = validatePeriod(req.query.period as string || 'week');
+      const name = req.params.name;
+      
+      if (!name) {
+        res.status(400).json({ error: 'name parameter is required' });
+        return;
+      }
+      
+      const period = validatePeriod((req.query.period as string) || 'week');
       
       const rank = await dashboard.getUserRank(userId, name, period);
       
@@ -482,7 +502,7 @@ export function createAnalyticsRouter(): Router {
   /**
    * Get analytics system status.
    */
-  router.get('/status', (_req: Request, res: Response) => {
+  router.get('/status', (_req: Request, res: Response): void => {
     res.json({
       collector: {
         running: collector.isRunning(),

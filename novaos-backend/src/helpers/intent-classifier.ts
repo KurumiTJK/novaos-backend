@@ -3,7 +3,7 @@
 // Implements IntentGate.classifyIntent with pattern-based classification
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Intent, UserInput } from './types';
+import { Intent, UserInput } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PATTERN DEFINITIONS
@@ -266,7 +266,7 @@ function estimateComplexity(
 // INTENT GATE IMPLEMENTATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
-import { GateResult, GateId, PipelineState, PipelineContext } from './types';
+import { GateResult, GateId, PipelineState, PipelineContext } from './types.js';
 
 export class IntentGate {
   readonly gateId: GateId = 'intent';

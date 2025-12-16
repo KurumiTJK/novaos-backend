@@ -14,7 +14,7 @@ import {
   UserOption,
   Stance,
   ConfidenceLevel,
-} from './types';
+} from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // INTERNAL HELPERS

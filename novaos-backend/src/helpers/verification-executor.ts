@@ -10,8 +10,8 @@ import {
   ConfidenceLevel,
   Citation,
   VerificationTrigger,
-} from './types';
-import { detectDomain, checkFreshness, isImmediateDomain } from './freshness-checker';
+} from './types.js';
+import { detectDomain, checkFreshness, isImmediateDomain } from './freshness-checker.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -189,7 +189,7 @@ export function validateUrlForFetch(url: string): { valid: boolean; reason?: str
   // Block numeric TLDs (often used for IP-based bypasses)
   const parts = hostname.split('.');
   const tld = parts[parts.length - 1];
-  if (/^\d+$/.test(tld)) {
+  if (tld && /^\d+$/.test(tld)) {
     return { valid: false, reason: 'Numeric TLD blocked' };
   }
   
@@ -273,6 +273,11 @@ const SOURCE_TRUST_SCORES: Record<string, number> = {
 };
 
 /**
+ * Default trust score for unknown domains.
+ */
+const DEFAULT_TRUST_SCORE = 0.50;
+
+/**
  * Get trust score for a URL.
  */
 function getTrustScore(url: string): number {
@@ -284,7 +289,7 @@ function getTrustScore(url: string): number {
     }
   }
   
-  return SOURCE_TRUST_SCORES.default;
+  return SOURCE_TRUST_SCORES.default ?? DEFAULT_TRUST_SCORE;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

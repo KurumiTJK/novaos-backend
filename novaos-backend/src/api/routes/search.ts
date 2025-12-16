@@ -71,6 +71,14 @@ const IndexMemorySchema = z.object({
 const logger = getLogger({ component: 'search-routes' });
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// HELPER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // ROUTER FACTORY
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -111,7 +119,7 @@ export function createSearchRouter(): Router {
         return;
       }
       
-      logger.error('Search failed', { error });
+      logger.error('Search failed', toError(error));
       res.status(500).json({ error: 'Search failed' });
     }
   });
@@ -138,7 +146,7 @@ export function createSearchRouter(): Router {
       
       res.json(results);
     } catch (error) {
-      logger.error('Conversation search failed', { error });
+      logger.error('Conversation search failed', toError(error));
       res.status(500).json({ error: 'Search failed' });
     }
   });
@@ -167,7 +175,7 @@ export function createSearchRouter(): Router {
       
       res.json(results);
     } catch (error) {
-      logger.error('Message search failed', { error });
+      logger.error('Message search failed', toError(error));
       res.status(500).json({ error: 'Search failed' });
     }
   });
@@ -196,19 +204,24 @@ export function createSearchRouter(): Router {
       
       res.json(results);
     } catch (error) {
-      logger.error('Memory search failed', { error });
+      logger.error('Memory search failed', toError(error));
       res.status(500).json({ error: 'Search failed' });
     }
   });
   
   /**
-   * GET /search/tags
+   * GET /search/tags/:tag
    * Search by tag
    */
   router.get('/tags/:tag', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { tag } = req.params;
+      const tag = req.params.tag;
+      
+      if (!tag) {
+        res.status(400).json({ error: 'Tag parameter is required' });
+        return;
+      }
       
       const results = await searchService.searchByTag(userId, tag, {
         limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
@@ -217,7 +230,7 @@ export function createSearchRouter(): Router {
       
       res.json(results);
     } catch (error) {
-      logger.error('Tag search failed', { error });
+      logger.error('Tag search failed', toError(error));
       res.status(500).json({ error: 'Search failed' });
     }
   });
@@ -242,7 +255,7 @@ export function createSearchRouter(): Router {
       
       res.json({ suggestions });
     } catch (error) {
-      logger.error('Suggestions failed', { error });
+      logger.error('Suggestions failed', toError(error));
       res.status(500).json({ error: 'Failed to get suggestions' });
     }
   });
@@ -254,15 +267,15 @@ export function createSearchRouter(): Router {
   router.get('/history', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
+      const limit = req.query.limit 
+        ? parseInt(req.query.limit as string, 10) 
+        : 50;
       
-      const history = await searchService.getSearchHistory(userId, {
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 20,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : 0,
-      });
+      const history = await searchService.getSearchHistory(userId, { limit });
       
       res.json({ history });
     } catch (error) {
-      logger.error('Get history failed', { error });
+      logger.error('Get history failed', toError(error));
       res.status(500).json({ error: 'Failed to get history' });
     }
   });
@@ -281,7 +294,7 @@ export function createSearchRouter(): Router {
       
       res.json({ cleared: count });
     } catch (error) {
-      logger.error('Clear history failed', { error });
+      logger.error('Clear history failed', toError(error));
       res.status(500).json({ error: 'Failed to clear history' });
     }
   });
@@ -301,7 +314,7 @@ export function createSearchRouter(): Router {
       
       res.json({ recent });
     } catch (error) {
-      logger.error('Get recent searches failed', { error });
+      logger.error('Get recent searches failed', toError(error));
       res.status(500).json({ error: 'Failed to get recent searches' });
     }
   });
@@ -342,7 +355,7 @@ export function createSearchRouter(): Router {
         return;
       }
       
-      logger.error('Index conversation failed', { error });
+      logger.error('Index conversation failed', toError(error));
       res.status(500).json({ error: 'Failed to index conversation' });
     }
   });
@@ -380,7 +393,7 @@ export function createSearchRouter(): Router {
         return;
       }
       
-      logger.error('Index message failed', { error });
+      logger.error('Index message failed', toError(error));
       res.status(500).json({ error: 'Failed to index message' });
     }
   });
@@ -418,7 +431,7 @@ export function createSearchRouter(): Router {
         return;
       }
       
-      logger.error('Index memory failed', { error });
+      logger.error('Index memory failed', toError(error));
       res.status(500).json({ error: 'Failed to index memory' });
     }
   });
@@ -430,7 +443,12 @@ export function createSearchRouter(): Router {
   router.delete('/index/:docId', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { docId } = req.params;
+      const docId = req.params.docId;
+      
+      if (!docId) {
+        res.status(400).json({ error: 'Document ID is required' });
+        return;
+      }
       
       const removed = await searchService.removeFromIndex(userId, docId);
       
@@ -443,7 +461,7 @@ export function createSearchRouter(): Router {
       
       res.json({ removed: true });
     } catch (error) {
-      logger.error('Remove from index failed', { error });
+      logger.error('Remove from index failed', toError(error));
       res.status(500).json({ error: 'Failed to remove from index' });
     }
   });
@@ -460,7 +478,7 @@ export function createSearchRouter(): Router {
       
       res.json(stats);
     } catch (error) {
-      logger.error('Get index stats failed', { error });
+      logger.error('Get index stats failed', toError(error));
       res.status(500).json({ error: 'Failed to get index stats' });
     }
   });
@@ -479,7 +497,7 @@ export function createSearchRouter(): Router {
       
       res.json({ cleared: count });
     } catch (error) {
-      logger.error('Clear index failed', { error });
+      logger.error('Clear index failed', toError(error));
       res.status(500).json({ error: 'Failed to clear index' });
     }
   });
@@ -500,7 +518,7 @@ export function createSearchRouter(): Router {
       
       res.json({ tags });
     } catch (error) {
-      logger.error('Get tags failed', { error });
+      logger.error('Get tags failed', toError(error));
       res.status(500).json({ error: 'Failed to get tags' });
     }
   });
@@ -521,7 +539,7 @@ export function createSearchRouter(): Router {
       
       res.json(stats);
     } catch (error) {
-      logger.error('Get search stats failed', { error });
+      logger.error('Get search stats failed', toError(error));
       res.status(500).json({ error: 'Failed to get search stats' });
     }
   });

@@ -14,7 +14,7 @@ import {
   TrustViolation,
   LinguisticViolation,
   GateId,
-} from './types';
+} from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // FIX B-4: FULL CRYPTOGRAPHIC HASHES

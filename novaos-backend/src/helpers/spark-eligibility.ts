@@ -12,7 +12,7 @@ import {
   SparkDecision,
   SparkIneligibilityReason,
   Intent,
-} from './types';
+} from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SPARK METRICS

@@ -43,6 +43,14 @@ const DeletionRequestSchema = z.object({
 const logger = getLogger({ component: 'export-routes' });
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// HELPER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // ROUTER FACTORY
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -96,7 +104,7 @@ export function createExportRouter(): Router {
         return;
       }
       
-      logger.error('Export failed', { error });
+      logger.error('Export failed', toError(error));
       res.status(500).json({ error: 'Export failed' });
     }
   });
@@ -133,7 +141,7 @@ export function createExportRouter(): Router {
         return;
       }
       
-      logger.error('Download export failed', { error });
+      logger.error('Download export failed', toError(error));
       res.status(500).json({ error: 'Export failed' });
     }
   });
@@ -145,7 +153,12 @@ export function createExportRouter(): Router {
   router.get('/:exportId', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { exportId } = req.params;
+      const exportId = req.params.exportId;
+      
+      if (!exportId) {
+        res.status(400).json({ error: 'Export ID is required' });
+        return;
+      }
       
       const job = await exportService.getExportJob(exportId);
       
@@ -175,7 +188,7 @@ export function createExportRouter(): Router {
         error: job.error,
       });
     } catch (error) {
-      logger.error('Get export failed', { error });
+      logger.error('Get export failed', toError(error));
       res.status(500).json({ error: 'Failed to get export' });
     }
   });
@@ -187,7 +200,12 @@ export function createExportRouter(): Router {
   router.get('/:exportId/download', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { exportId } = req.params;
+      const exportId = req.params.exportId;
+      
+      if (!exportId) {
+        res.status(400).json({ error: 'Export ID is required' });
+        return;
+      }
       
       const job = await exportService.getExportJob(exportId);
       
@@ -219,7 +237,7 @@ export function createExportRouter(): Router {
       res.setHeader('Content-Disposition', `attachment; filename="${job.result.filename}"`);
       res.send(content);
     } catch (error) {
-      logger.error('Download failed', { error });
+      logger.error('Download failed', toError(error));
       res.status(500).json({ error: 'Download failed' });
     }
   });
@@ -247,7 +265,7 @@ export function createExportRouter(): Router {
         })),
       });
     } catch (error) {
-      logger.error('List exports failed', { error });
+      logger.error('List exports failed', toError(error));
       res.status(500).json({ error: 'Failed to list exports' });
     }
   });
@@ -263,7 +281,13 @@ export function createExportRouter(): Router {
   router.get('/conversation/:conversationId', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { conversationId } = req.params;
+      const conversationId = req.params.conversationId;
+      
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+      
       const format = (req.query.format as 'json' | 'markdown' | 'csv') ?? 'markdown';
       
       const { content, conversation } = await exportService.exportConversation(
@@ -283,7 +307,7 @@ export function createExportRouter(): Router {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(content);
     } catch (error) {
-      logger.error('Export conversation failed', { error });
+      logger.error('Export conversation failed', toError(error));
       res.status(500).json({ error: 'Export failed' });
     }
   });
@@ -295,7 +319,13 @@ export function createExportRouter(): Router {
   router.get('/goal/:goalId', async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { goalId } = req.params;
+      const goalId = req.params.goalId;
+      
+      if (!goalId) {
+        res.status(400).json({ error: 'Goal ID is required' });
+        return;
+      }
+      
       const format = (req.query.format as 'json' | 'markdown' | 'csv') ?? 'markdown';
       
       const { content, goal } = await exportService.exportGoal(userId, goalId, format);
@@ -311,7 +341,7 @@ export function createExportRouter(): Router {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(content);
     } catch (error) {
-      logger.error('Export goal failed', { error });
+      logger.error('Export goal failed', toError(error));
       res.status(500).json({ error: 'Export failed' });
     }
   });
@@ -352,7 +382,7 @@ export function createExportRouter(): Router {
         return;
       }
       
-      logger.error('Import failed', { error });
+      logger.error('Import failed', toError(error));
       res.status(500).json({ error: 'Import failed' });
     }
   });
@@ -386,7 +416,7 @@ export function createExportRouter(): Router {
         return;
       }
       
-      logger.error('Validate import failed', { error });
+      logger.error('Validate import failed', toError(error));
       res.status(500).json({ error: 'Validation failed' });
     }
   });
@@ -434,7 +464,7 @@ export function createExportRouter(): Router {
         return;
       }
       
-      logger.error('Deletion failed', { error });
+      logger.error('Deletion failed', toError(error));
       res.status(500).json({ error: 'Deletion failed' });
     }
   });
@@ -472,7 +502,7 @@ export function createExportRouter(): Router {
         confirmationRequired: userId,
       });
     } catch (error) {
-      logger.error('Deletion preview failed', { error });
+      logger.error('Deletion preview failed', toError(error));
       res.status(500).json({ error: 'Preview failed' });
     }
   });

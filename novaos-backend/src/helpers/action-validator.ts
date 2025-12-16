@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { z } from 'zod';
-import { ActionType, ActionSource, RequestedAction, PipelineState } from './types';
+import { ActionType, ActionSource, RequestedAction, PipelineState } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SCHEMA DEFINITIONS

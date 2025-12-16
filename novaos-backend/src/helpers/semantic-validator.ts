@@ -3,7 +3,7 @@
 // Detects action recommendations semantically, not just by keywords
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { LinguisticViolation, GenerationConstraints } from './types';
+import { LinguisticViolation, GenerationConstraints } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPES

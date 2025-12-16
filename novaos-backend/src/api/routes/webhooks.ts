@@ -3,10 +3,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, type Request, type Response } from 'express';
-import { getWebhookStore } from '../webhooks/store.js';
-import { getWebhookDispatcher } from '../webhooks/dispatcher.js';
-import { ALL_EVENT_TYPES, type WebhookEventType } from '../webhooks/types.js';
-import { getLogger } from '../logging/index.js';
+import { getWebhookStore } from '../../webhooks/store.js';
+import { getWebhookDispatcher } from '../../webhooks/dispatcher.js';
+import { ALL_EVENT_TYPES, type WebhookEventType } from '../../webhooks/types.js';
+import { getLogger } from '../../logging/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SETUP
@@ -65,7 +65,7 @@ export function createWebhooksRouter(): Router {
   // LIST WEBHOOKS
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const webhooks = await store.getUserWebhooks(userId);
@@ -90,17 +90,19 @@ export function createWebhooksRouter(): Router {
   // CREATE WEBHOOK
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const { name, description, url, events, options, customHeaders } = req.body;
       
       // Validation
       if (!name || typeof name !== 'string') {
-        return res.status(400).json({ error: 'name is required' });
+        res.status(400).json({ error: 'name is required' });
+        return;
       }
       if (!url || typeof url !== 'string') {
-        return res.status(400).json({ error: 'url is required' });
+        res.status(400).json({ error: 'url is required' });
+        return;
       }
       
       validateUrl(url);
@@ -137,15 +139,21 @@ export function createWebhooksRouter(): Router {
   // GET WEBHOOK
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const webhook = await store.getWebhook(id);
       
       if (!webhook || webhook.userId !== userId) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       // Remove secret
@@ -165,10 +173,16 @@ export function createWebhooksRouter(): Router {
   // UPDATE WEBHOOK
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.patch('/:id', async (req: AuthenticatedRequest, res: Response) => {
+  router.patch('/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
+      
       const { name, description, url, events, status, options, customHeaders } = req.body;
       
       // Validate URL if provided
@@ -193,7 +207,8 @@ export function createWebhooksRouter(): Router {
       });
       
       if (!webhook) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       logger.info('Webhook updated', {
@@ -218,15 +233,21 @@ export function createWebhooksRouter(): Router {
   // DELETE WEBHOOK
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
+  router.delete('/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const deleted = await store.deleteWebhook(id, userId);
       
       if (!deleted) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       logger.info('Webhook deleted', {
@@ -245,15 +266,21 @@ export function createWebhooksRouter(): Router {
   // ROTATE SECRET
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/:id/rotate-secret', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/:id/rotate-secret', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const newSecret = await store.rotateSecret(id, userId);
       
       if (!newSecret) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       logger.info('Webhook secret rotated', {
@@ -275,15 +302,21 @@ export function createWebhooksRouter(): Router {
   // TEST WEBHOOK
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/:id/test', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/:id/test', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       // Verify ownership
       const webhook = await store.getWebhook(id);
       if (!webhook || webhook.userId !== userId) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       const result = await dispatcher.testWebhook(id);
@@ -310,16 +343,23 @@ export function createWebhooksRouter(): Router {
   // GET DELIVERIES
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/:id/deliveries', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/:id/deliveries', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
+      
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
       
       // Verify ownership
       const webhook = await store.getWebhook(id);
       if (!webhook || webhook.userId !== userId) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       const deliveries = await store.getWebhookDeliveries(id, limit);
@@ -338,21 +378,29 @@ export function createWebhooksRouter(): Router {
   // GET DELIVERY LOG
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/:id/deliveries/:deliveryId/log', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/:id/deliveries/:deliveryId/log', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id, deliveryId } = req.params;
+      const id = req.params.id;
+      const deliveryId = req.params.deliveryId;
+      
+      if (!id || !deliveryId) {
+        res.status(400).json({ error: 'id and deliveryId parameters are required' });
+        return;
+      }
       
       // Verify ownership
       const webhook = await store.getWebhook(id);
       if (!webhook || webhook.userId !== userId) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       const log = await store.getDeliveryLog(deliveryId);
       
       if (!log || log.webhookId !== id) {
-        return res.status(404).json({ error: 'Delivery log not found' });
+        res.status(404).json({ error: 'Delivery log not found' });
+        return;
       }
       
       res.json({ log });
@@ -366,26 +414,35 @@ export function createWebhooksRouter(): Router {
   // RETRY DELIVERY
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/:id/deliveries/:deliveryId/retry', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/:id/deliveries/:deliveryId/retry', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id, deliveryId } = req.params;
+      const id = req.params.id;
+      const deliveryId = req.params.deliveryId;
+      
+      if (!id || !deliveryId) {
+        res.status(400).json({ error: 'id and deliveryId parameters are required' });
+        return;
+      }
       
       // Verify ownership
       const webhook = await store.getWebhook(id);
       if (!webhook || webhook.userId !== userId) {
-        return res.status(404).json({ error: 'Webhook not found' });
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
       }
       
       const delivery = await store.getDelivery(deliveryId);
       if (!delivery || delivery.webhookId !== id) {
-        return res.status(404).json({ error: 'Delivery not found' });
+        res.status(404).json({ error: 'Delivery not found' });
+        return;
       }
       
       const success = await dispatcher.retryDelivery(deliveryId);
       
       if (!success) {
-        return res.status(400).json({ error: 'Cannot retry this delivery' });
+        res.status(400).json({ error: 'Cannot retry this delivery' });
+        return;
       }
       
       logger.info('Delivery retry scheduled', {
@@ -405,7 +462,7 @@ export function createWebhooksRouter(): Router {
   // LIST EVENT TYPES
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/meta/event-types', (_req: Request, res: Response) => {
+  router.get('/meta/event-types', (_req: Request, res: Response): void => {
     res.json({
       eventTypes: ALL_EVENT_TYPES,
     });
@@ -415,7 +472,7 @@ export function createWebhooksRouter(): Router {
   // DISPATCHER STATUS
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/meta/status', (_req: Request, res: Response) => {
+  router.get('/meta/status', (_req: Request, res: Response): void => {
     const stats = dispatcher.getStats();
     res.json(stats);
   });

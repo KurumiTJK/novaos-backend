@@ -3,10 +3,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, type Request, type Response } from 'express';
-import { getNotificationStore } from '../notifications/store.js';
-import { getNotificationService } from '../notifications/service.js';
-import type { NotificationType, NotificationPriority } from '../notifications/types.js';
-import { getLogger } from '../logging/index.js';
+import { getNotificationStore } from '../../notifications/store.js';
+import { getNotificationService } from '../../notifications/service.js';
+import type { NotificationType, NotificationPriority } from '../../notifications/types.js';
+import { getLogger } from '../../logging/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SETUP
@@ -39,7 +39,7 @@ export function createNotificationsRouter(): Router {
   // LIST NOTIFICATIONS
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
@@ -74,7 +74,7 @@ export function createNotificationsRouter(): Router {
   // GET UNREAD NOTIFICATIONS
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/unread', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/unread', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
@@ -95,7 +95,7 @@ export function createNotificationsRouter(): Router {
   // GET SUMMARY
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/summary', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/summary', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const summary = await store.getSummary(userId);
@@ -111,7 +111,7 @@ export function createNotificationsRouter(): Router {
   // GET UNREAD COUNT
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/count', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/count', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const unreadCount = await store.getUnreadCount(userId);
@@ -127,15 +127,21 @@ export function createNotificationsRouter(): Router {
   // GET NOTIFICATION
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const notification = await store.getNotification(id);
       
       if (!notification || notification.userId !== userId) {
-        return res.status(404).json({ error: 'Notification not found' });
+        res.status(404).json({ error: 'Notification not found' });
+        return;
       }
       
       res.json({ notification });
@@ -149,15 +155,21 @@ export function createNotificationsRouter(): Router {
   // MARK AS READ
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/:id/read', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/:id/read', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const success = await store.markAsRead(id, userId);
       
       if (!success) {
-        return res.status(404).json({ error: 'Notification not found' });
+        res.status(404).json({ error: 'Notification not found' });
+        return;
       }
       
       res.json({ message: 'Marked as read' });
@@ -171,7 +183,7 @@ export function createNotificationsRouter(): Router {
   // MARK ALL AS READ
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/read-all', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/read-all', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const count = await store.markAllAsRead(userId);
@@ -189,15 +201,21 @@ export function createNotificationsRouter(): Router {
   // DISMISS NOTIFICATION
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/:id/dismiss', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/:id/dismiss', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const success = await store.dismiss(id, userId);
       
       if (!success) {
-        return res.status(404).json({ error: 'Notification not found' });
+        res.status(404).json({ error: 'Notification not found' });
+        return;
       }
       
       res.json({ message: 'Dismissed' });
@@ -211,7 +229,7 @@ export function createNotificationsRouter(): Router {
   // DISMISS ALL
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/dismiss-all', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/dismiss-all', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const count = await store.dismissAll(userId);
@@ -229,15 +247,21 @@ export function createNotificationsRouter(): Router {
   // DELETE NOTIFICATION
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
+  router.delete('/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
-      const { id } = req.params;
+      const id = req.params.id;
+      
+      if (!id) {
+        res.status(400).json({ error: 'id parameter is required' });
+        return;
+      }
       
       const deleted = await store.deleteNotification(id, userId);
       
       if (!deleted) {
-        return res.status(404).json({ error: 'Notification not found' });
+        res.status(404).json({ error: 'Notification not found' });
+        return;
       }
       
       res.json({ message: 'Deleted' });
@@ -251,7 +275,7 @@ export function createNotificationsRouter(): Router {
   // PREFERENCES
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.get('/preferences', async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/preferences', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const preferences = await store.getPreferences(userId);
@@ -263,7 +287,7 @@ export function createNotificationsRouter(): Router {
     }
   });
   
-  router.patch('/preferences', async (req: AuthenticatedRequest, res: Response) => {
+  router.patch('/preferences', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const updates = req.body;
@@ -286,7 +310,7 @@ export function createNotificationsRouter(): Router {
   // CLEANUP EXPIRED
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  router.post('/cleanup', async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/cleanup', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = getUserId(req);
       const removed = await store.cleanupExpired(userId);

@@ -28,6 +28,13 @@ export interface KeyValueStore {
   lrange(key: string, start: number, stop: number): Promise<string[]>;
   ltrim(key: string, start: number, stop: number): Promise<void>;
   
+  // Set operations
+  sadd(key: string, ...members: string[]): Promise<number>;
+  srem(key: string, ...members: string[]): Promise<number>;
+  smembers(key: string): Promise<string[]>;
+  sismember(key: string, member: string): Promise<boolean>;
+  scard(key: string): Promise<number>;
+  
   // Connection
   isConnected(): boolean;
   disconnect(): Promise<void>;
@@ -149,6 +156,27 @@ export class RedisStore implements KeyValueStore {
     await this.client.ltrim(key, start, stop);
   }
 
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    return this.client.sadd(key, ...members);
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    return this.client.srem(key, ...members);
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    return this.client.smembers(key);
+  }
+
+  async sismember(key: string, member: string): Promise<boolean> {
+    const result = await this.client.sismember(key, member);
+    return result === 1;
+  }
+
+  async scard(key: string): Promise<number> {
+    return this.client.scard(key);
+  }
+
   async disconnect(): Promise<void> {
     await this.client.quit();
   }
@@ -167,6 +195,7 @@ export class MemoryStore implements KeyValueStore {
   private store = new Map<string, MemoryEntry>();
   private hashes = new Map<string, Map<string, string>>();
   private lists = new Map<string, string[]>();
+  private sets = new Map<string, Set<string>>();
 
   isConnected(): boolean {
     return true;
@@ -203,7 +232,12 @@ export class MemoryStore implements KeyValueStore {
   }
 
   async delete(key: string): Promise<boolean> {
-    return this.store.delete(key);
+    const existed = this.store.has(key) || this.lists.has(key) || this.sets.has(key) || this.hashes.has(key);
+    this.store.delete(key);
+    this.lists.delete(key);
+    this.sets.delete(key);
+    this.hashes.delete(key);
+    return existed;
   }
 
   async exists(key: string): Promise<boolean> {
@@ -272,26 +306,69 @@ export class MemoryStore implements KeyValueStore {
 
   async lrange(key: string, start: number, stop: number): Promise<string[]> {
     const list = this.lists.get(key) ?? [];
-    const end = stop === -1 ? list.length : stop + 1;
+    const end = stop < 0 ? list.length + stop + 1 : stop + 1;
     return list.slice(start, end);
   }
 
   async ltrim(key: string, start: number, stop: number): Promise<void> {
     const list = this.lists.get(key);
     if (!list) return;
-    const end = stop === -1 ? list.length : stop + 1;
-    this.lists.set(key, list.slice(start, end));
+    const end = stop < 0 ? list.length + stop + 1 : stop + 1;
+    const trimmed = list.slice(start, end);
+    this.lists.set(key, trimmed);
+  }
+
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    let set = this.sets.get(key);
+    if (!set) {
+      set = new Set();
+      this.sets.set(key, set);
+    }
+    let added = 0;
+    for (const member of members) {
+      if (!set.has(member)) {
+        set.add(member);
+        added++;
+      }
+    }
+    return added;
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    const set = this.sets.get(key);
+    if (!set) return 0;
+    let removed = 0;
+    for (const member of members) {
+      if (set.delete(member)) removed++;
+    }
+    return removed;
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    const set = this.sets.get(key);
+    return set ? Array.from(set) : [];
+  }
+
+  async sismember(key: string, member: string): Promise<boolean> {
+    const set = this.sets.get(key);
+    return set?.has(member) ?? false;
+  }
+
+  async scard(key: string): Promise<number> {
+    const set = this.sets.get(key);
+    return set?.size ?? 0;
   }
 
   async disconnect(): Promise<void> {
     this.store.clear();
     this.hashes.clear();
     this.lists.clear();
+    this.sets.clear();
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STORE MANAGER (Redis with Memory fallback)
+// STORE MANAGER
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export class StoreManager {
@@ -301,23 +378,27 @@ export class StoreManager {
 
   constructor() {
     this.memory = new MemoryStore();
+    
+    // Try to initialize Redis if REDIS_URL is set
+    if (process.env.REDIS_URL) {
+      try {
+        this.redis = new RedisStore(process.env.REDIS_URL);
+        this.useRedis = true;
+      } catch (error) {
+        console.warn('[STORAGE] Redis initialization failed, using memory store');
+        this.useRedis = false;
+      }
+    }
   }
 
-  async initialize(redisUrl?: string): Promise<void> {
-    if (process.env.DISABLE_REDIS === 'true') {
-      console.log('[STORE] Redis disabled, using memory store');
-      return;
-    }
-
-    try {
-      this.redis = new RedisStore(redisUrl);
-      await this.redis.connect();
-      this.useRedis = true;
-      console.log('[STORE] Using Redis store');
-    } catch (error) {
-      console.warn('[STORE] Redis unavailable, falling back to memory store');
-      this.redis = null;
-      this.useRedis = false;
+  async initialize(): Promise<void> {
+    if (this.redis && this.useRedis) {
+      try {
+        await this.redis.connect();
+      } catch (error) {
+        console.warn('[STORAGE] Redis connection failed, falling back to memory store');
+        this.useRedis = false;
+      }
     }
   }
 
@@ -332,11 +413,15 @@ export class StoreManager {
     return this.useRedis && (this.redis?.isConnected() ?? false);
   }
 
-  async disconnect(): Promise<void> {
+  async close(): Promise<void> {
     if (this.redis) {
       await this.redis.disconnect();
     }
     await this.memory.disconnect();
+  }
+
+  async disconnect(): Promise<void> {
+    return this.close();
   }
 }
 

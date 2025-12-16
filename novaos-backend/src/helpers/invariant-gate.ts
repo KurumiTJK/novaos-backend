@@ -14,9 +14,9 @@ import {
   RiskSummary,
   VerificationPlan,
   SparkDecision,
-} from './types';
-import { verifyCrisisResourcesPresent } from './safety-renderer';
-import { detectDomain, isImmediateDomain } from './freshness-checker';
+} from './types.js';
+import { verifyCrisisResourcesPresent } from './safety-renderer.js';
+import { detectDomain, isImmediateDomain } from './freshness-checker.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // INVARIANT DEFINITIONS

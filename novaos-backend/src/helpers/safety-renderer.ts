@@ -4,7 +4,7 @@
 // Resources are NEVER passed through the model — they are injected after
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { CrisisResource, PipelineState } from './types';
+import { CrisisResource, PipelineState } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CRISIS RESOURCES — Immutable, never model-generated
@@ -200,7 +200,12 @@ export function verifyResourceBlockIntegrity(
     return false;
   }
 
-  const blockEnd = matches[1].index! + matches[1][0].length;
+  const secondMatch = matches[1];
+  if (!secondMatch || secondMatch.index === undefined) {
+    return false;
+  }
+
+  const blockEnd = secondMatch.index + secondMatch[0].length;
   const extractedBlock = responseText.slice(0, blockEnd + 1); // +1 for newline
 
   const actualHash = hashResourceBlock(extractedBlock);

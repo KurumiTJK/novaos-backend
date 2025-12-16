@@ -327,7 +327,8 @@ export function checkFreshness(
   domain: string,
   dataTimestamp: Date | null
 ): FreshnessResult {
-  const window = FRESHNESS_WINDOWS[domain] || FRESHNESS_WINDOWS.general;
+  // Always use a defined window - fall back to general if not found
+  const window: FreshnessWindow = FRESHNESS_WINDOWS[domain] ?? FRESHNESS_WINDOWS.general;
 
   // If no max age (never stale), always fresh
   if (window.maxAgeMs === null) {

@@ -3,7 +3,7 @@
 // State isolation, timeout handling, and error sanitization
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { PipelineState, PipelineResult } from './types';
+import { PipelineState, PipelineResult } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // FIX E-3: STATE ISOLATION
@@ -179,9 +179,27 @@ export interface ClientError {
 }
 
 /**
+ * Error message mapping type.
+ */
+interface ErrorMapping {
+  code: ClientErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+/**
+ * Default error for unknown cases.
+ */
+const DEFAULT_ERROR: ErrorMapping = {
+  code: 'SERVICE_ERROR',
+  message: 'An unexpected error occurred',
+  retryable: true,
+};
+
+/**
  * Map internal error codes to client-safe messages.
  */
-const ERROR_MESSAGES: Record<string, { code: ClientErrorCode; message: string; retryable: boolean }> = {
+const ERROR_MESSAGES: Record<string, ErrorMapping> = {
   // Validation errors
   INVALID_TYPE: {
     code: 'INVALID_REQUEST',
@@ -251,6 +269,13 @@ const ERROR_MESSAGES: Record<string, { code: ClientErrorCode; message: string; r
 };
 
 /**
+ * Get error mapping with guaranteed fallback.
+ */
+function getErrorMapping(errorCode: string): ErrorMapping {
+  return ERROR_MESSAGES[errorCode] ?? DEFAULT_ERROR;
+}
+
+/**
  * Sanitize an internal error for client response.
  * NEVER expose internal details like gate names, policy versions, stack traces.
  * 
@@ -272,8 +297,8 @@ export function sanitizeError(error: unknown, requestId?: string): ClientError {
 
   // Handle errors with codes
   if (error && typeof error === 'object' && 'code' in error) {
-    const errorCode = String((error as any).code);
-    const mapping = ERROR_MESSAGES[errorCode] || ERROR_MESSAGES.UNKNOWN;
+    const errorCode = String((error as { code: unknown }).code);
+    const mapping = getErrorMapping(errorCode);
     
     return {
       code: mapping.code,
@@ -289,13 +314,31 @@ export function sanitizeError(error: unknown, requestId?: string): ClientError {
     const msg = error.message.toLowerCase();
     
     if (msg.includes('timeout')) {
-      return { ...ERROR_MESSAGES.PIPELINE_TIMEOUT, requestId };
+      const mapping = getErrorMapping('PIPELINE_TIMEOUT');
+      return {
+        code: mapping.code,
+        message: mapping.message,
+        requestId,
+        retryable: mapping.retryable,
+      };
     }
     if (msg.includes('unauthorized') || msg.includes('authentication')) {
-      return { ...ERROR_MESSAGES.UNAUTHORIZED, requestId };
+      const mapping = getErrorMapping('UNAUTHORIZED');
+      return {
+        code: mapping.code,
+        message: mapping.message,
+        requestId,
+        retryable: mapping.retryable,
+      };
     }
     if (msg.includes('veto')) {
-      return { ...ERROR_MESSAGES.HARD_VETO, requestId };
+      const mapping = getErrorMapping('HARD_VETO');
+      return {
+        code: mapping.code,
+        message: mapping.message,
+        requestId,
+        retryable: mapping.retryable,
+      };
     }
   }
 
