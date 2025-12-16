@@ -1,6 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAOS TESTING — Resilience & Failure Scenario Testing
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+// These tests require a running server. Run with:
+//   CHAOS_BASE_URL=http://localhost:3000 npm test -- --run src/tests/load/chaos.test.ts
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
@@ -10,13 +15,14 @@ import {
   wait,
   randomString,
   type TestUser,
-} from './e2e/utils.js';
+} from '../e2e/utils.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const BASE_URL = process.env.CHAOS_BASE_URL ?? 'http://localhost:3000';
+const SKIP_CHAOS = !process.env.CHAOS_BASE_URL;
 
 // Chaos test timeouts (longer to allow for recovery)
 const CHAOS_TIMEOUT = 30000;
@@ -117,7 +123,7 @@ ${result.notes.length > 0 ? result.notes.map(n => `║ • ${n.substring(0, 61).
 // RATE LIMIT CHAOS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Chaos: Rate Limiting', { timeout: CHAOS_TIMEOUT }, () => {
+describe.skipIf(SKIP_CHAOS)('Chaos: Rate Limiting', { timeout: CHAOS_TIMEOUT }, () => {
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;
   
@@ -196,7 +202,7 @@ Burst Test Results:
 // TIMEOUT CHAOS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Chaos: Timeout Handling', { timeout: CHAOS_TIMEOUT }, () => {
+describe.skipIf(SKIP_CHAOS)('Chaos: Timeout Handling', { timeout: CHAOS_TIMEOUT }, () => {
   let user: TestUser;
   
   beforeAll(async () => {
@@ -274,7 +280,7 @@ describe('Chaos: Timeout Handling', { timeout: CHAOS_TIMEOUT }, () => {
 // MALFORMED INPUT CHAOS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Chaos: Malformed Input Handling', { timeout: CHAOS_TIMEOUT }, () => {
+describe.skipIf(SKIP_CHAOS)('Chaos: Malformed Input Handling', { timeout: CHAOS_TIMEOUT }, () => {
   let user: TestUser;
   
   beforeAll(async () => {
@@ -371,7 +377,7 @@ describe('Chaos: Malformed Input Handling', { timeout: CHAOS_TIMEOUT }, () => {
 // CONCURRENT USER CHAOS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Chaos: Concurrent User Conflicts', { timeout: CHAOS_TIMEOUT }, () => {
+describe.skipIf(SKIP_CHAOS)('Chaos: Concurrent User Conflicts', { timeout: CHAOS_TIMEOUT }, () => {
   it('should handle multiple users modifying same resources', async () => {
     // Create two users
     const user1 = await createTestUser(BASE_URL, `chaos_user1_${randomString()}@example.com`, 'pro');
@@ -450,7 +456,7 @@ describe('Chaos: Concurrent User Conflicts', { timeout: CHAOS_TIMEOUT }, () => {
 // RESOURCE EXHAUSTION CHAOS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Chaos: Resource Exhaustion', { timeout: CHAOS_TIMEOUT }, () => {
+describe.skipIf(SKIP_CHAOS)('Chaos: Resource Exhaustion', { timeout: CHAOS_TIMEOUT }, () => {
   let user: TestUser;
   
   beforeAll(async () => {
@@ -536,7 +542,7 @@ describe('Chaos: Resource Exhaustion', { timeout: CHAOS_TIMEOUT }, () => {
 // RECOVERY TESTING
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Chaos: Recovery', { timeout: CHAOS_TIMEOUT }, () => {
+describe.skipIf(SKIP_CHAOS)('Chaos: Recovery', { timeout: CHAOS_TIMEOUT }, () => {
   it('should recover service availability after errors', async () => {
     const user = await createTestUser(BASE_URL, `chaos_recovery_${randomString()}@example.com`);
     

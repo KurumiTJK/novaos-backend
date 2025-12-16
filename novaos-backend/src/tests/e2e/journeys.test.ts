@@ -1,6 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // E2E USER JOURNEY TESTS — Full User Flow Testing
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+// These tests require a running server. Run with:
+//   E2E_BASE_URL=http://localhost:3000 npm test -- --run src/tests/e2e/journeys.test.ts
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
@@ -23,13 +28,14 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
+const SKIP_E2E = !process.env.E2E_BASE_URL;
 const LATENCY_THRESHOLD_MS = 2000; // 2 second max for individual requests
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // NEW USER ONBOARDING JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: New User Onboarding Journey', () => {
+describe.skipIf(SKIP_E2E)('E2E: New User Onboarding Journey', () => {
   let ctx: TestContext;
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;
@@ -151,7 +157,7 @@ describe('E2E: New User Onboarding Journey', () => {
 // GOAL COMPLETION JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: Goal Completion Journey', () => {
+describe.skipIf(SKIP_E2E)('E2E: Goal Completion Journey', () => {
   let ctx: TestContext;
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;
@@ -271,7 +277,7 @@ describe('E2E: Goal Completion Journey', () => {
 // MEMORY & PERSONALIZATION JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: Memory & Personalization Journey', () => {
+describe.skipIf(SKIP_E2E)('E2E: Memory & Personalization Journey', () => {
   let ctx: TestContext;
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;
@@ -376,7 +382,7 @@ describe('E2E: Memory & Personalization Journey', () => {
 // SEARCH & DISCOVERY JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: Search & Discovery Journey', () => {
+describe.skipIf(SKIP_E2E)('E2E: Search & Discovery Journey', () => {
   let ctx: TestContext;
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;
@@ -447,7 +453,7 @@ describe('E2E: Search & Discovery Journey', () => {
 // DATA EXPORT JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: Data Export Journey', () => {
+describe.skipIf(SKIP_E2E)('E2E: Data Export Journey', () => {
   let ctx: TestContext;
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;
@@ -519,7 +525,7 @@ describe('E2E: Data Export Journey', () => {
 // MULTI-SESSION JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: Multi-Session Continuity', () => {
+describe.skipIf(SKIP_E2E)('E2E: Multi-Session Continuity', () => {
   let ctx: TestContext;
   let user: TestUser;
   let conversationId: string;
@@ -582,7 +588,7 @@ describe('E2E: Multi-Session Continuity', () => {
 // ERROR RECOVERY JOURNEY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('E2E: Error Handling & Recovery', () => {
+describe.skipIf(SKIP_E2E)('E2E: Error Handling & Recovery', () => {
   let ctx: TestContext;
   let user: TestUser;
   let client: ReturnType<typeof createAuthenticatedClient>;

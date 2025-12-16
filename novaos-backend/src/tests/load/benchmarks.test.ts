@@ -1,6 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // PERFORMANCE BENCHMARKS — Automated Performance Testing
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+// These tests require a running server. Run with:
+//   BENCHMARK_BASE_URL=http://localhost:3000 npm test -- --run src/tests/load/benchmarks.test.ts
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
@@ -12,13 +17,14 @@ import {
   wait,
   randomString,
   type TestUser,
-} from './e2e/utils.js';
+} from '../e2e/utils.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const BASE_URL = process.env.BENCHMARK_BASE_URL ?? 'http://localhost:3000';
+const SKIP_BENCHMARKS = !process.env.BENCHMARK_BASE_URL;
 
 // Performance thresholds (in milliseconds)
 const THRESHOLDS = {
@@ -125,7 +131,7 @@ function printBenchmarkResult(result: BenchmarkResult): void {
 // HEALTH BENCHMARKS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Health Endpoints', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Health Endpoints', () => {
   it('should benchmark /health endpoint', async () => {
     const result = await runBenchmark(
       'GET /health',
@@ -181,7 +187,7 @@ describe('Performance Benchmarks: Health Endpoints', () => {
 // AUTH BENCHMARKS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Auth Endpoints', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Auth Endpoints', () => {
   it('should benchmark user registration', async () => {
     let counter = 0;
     
@@ -231,7 +237,7 @@ describe('Performance Benchmarks: Auth Endpoints', () => {
 // CHAT BENCHMARKS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Chat Endpoints', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Chat Endpoints', () => {
   let user: TestUser;
   
   beforeAll(async () => {
@@ -264,7 +270,7 @@ describe('Performance Benchmarks: Chat Endpoints', () => {
 // GOALS BENCHMARKS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Goals Endpoints', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Goals Endpoints', () => {
   let user: TestUser;
   let goalIds: string[] = [];
   
@@ -358,7 +364,7 @@ describe('Performance Benchmarks: Goals Endpoints', () => {
 // MEMORY BENCHMARKS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Memory Endpoints', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Memory Endpoints', () => {
   let user: TestUser;
   let memoryIds: string[] = [];
   
@@ -449,7 +455,7 @@ describe('Performance Benchmarks: Memory Endpoints', () => {
 // SEARCH BENCHMARKS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Search Endpoints', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Search Endpoints', () => {
   let user: TestUser;
   
   beforeAll(async () => {
@@ -514,7 +520,7 @@ describe('Performance Benchmarks: Search Endpoints', () => {
 // CONCURRENT LOAD BENCHMARK
 // ─────────────────────────────────────────────────────────────────────────────────
 
-describe('Performance Benchmarks: Concurrent Load', () => {
+describe.skipIf(SKIP_BENCHMARKS)('Performance Benchmarks: Concurrent Load', () => {
   it('should handle 50 concurrent users', async () => {
     const userCount = 50;
     const users: TestUser[] = [];
