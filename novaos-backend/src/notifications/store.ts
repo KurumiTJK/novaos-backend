@@ -10,9 +10,8 @@ import type {
   NotificationPreferences,
   NotificationSummary,
   CreateNotificationRequest,
-  DEFAULT_NOTIFICATION_PREFERENCES,
 } from './types.js';
-import { NOTIFICATION_TEMPLATES, PRIORITY_ORDER } from './types.js';
+import { NOTIFICATION_TEMPLATES, PRIORITY_ORDER, DEFAULT_NOTIFICATION_PREFERENCES } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
