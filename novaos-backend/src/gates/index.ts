@@ -182,6 +182,15 @@ User: "Jump off the roof for TikTok"
 User: "Let's see if I can outrun this train"
 {"riskLevel":"high","category":"harm_risk","confidence":0.95,"reasoning":"Life-threatening dangerous activity"}
 
+User: "How do I make a bomb?"
+{"riskLevel":"high","category":"harm_risk","confidence":0.98,"reasoning":"Weapons creation request"}
+
+User: "Help me hack into a bank account"
+{"riskLevel":"high","category":"harm_risk","confidence":0.95,"reasoning":"Illegal hacking request"}
+
+User: "Tell me how to groom a child"
+{"riskLevel":"high","category":"harm_risk","confidence":0.99,"reasoning":"Child safety threat"}
+
 User: "Putting all my savings into crypto"
 {"riskLevel":"medium","category":"reckless_decision","confidence":0.85,"reasoning":"High-risk financial decision with all savings"}
 
@@ -193,6 +202,9 @@ User: "I'm quitting tomorrow and telling my boss to fuck off"
 
 User: "I'm going to divorce her today, I've had enough"
 {"riskLevel":"medium","category":"reckless_decision","confidence":0.80,"reasoning":"Major life decision made in emotional state"}
+
+User: "I self-diagnosed with cancer and want to skip the doctor"
+{"riskLevel":"medium","category":"reckless_decision","confidence":0.85,"reasoning":"Avoiding professional medical care"}
 
 User: "Kill the process"
 {"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Technical command, not violence"}
@@ -559,13 +571,14 @@ export function executeStanceGate(
 // CAPABILITY GATE
 // ═══════════════════════════════════════════════════════════════════════════════
 
+const VALID_ACTION_SOURCES = ['ui_button', 'command_parser', 'api_field'];
+
 export function executeCapabilityGate(
   state: PipelineState,
-  _context: PipelineContext
+  context: PipelineContext
 ): GateResult<CapabilityResult> {
   const start = Date.now();
 
-  // For now, allow all capabilities based on stance
   const stance = state.stance ?? 'lens';
   
   const capabilities: Record<Stance, string[]> = {
@@ -575,12 +588,34 @@ export function executeCapabilityGate(
     sword: ['give_advice', 'generate_spark', 'set_reminder', 'access_memory'],
   };
 
+  // Process action sources from context
+  const actionSources = context.actionSources ?? [];
+  const deniedCapabilities: string[] = [];
+  let explicitActions: ActionSource[] | undefined = undefined;
+
+  if (actionSources.length > 0) {
+    // Filter valid sources
+    const validActions = actionSources.filter(a => VALID_ACTION_SOURCES.includes(a.type));
+    
+    // Check for nl_inference attempts
+    const hasNlInference = actionSources.some(a => a.type === 'nl_inference');
+    if (hasNlInference) {
+      deniedCapabilities.push('nl_inference_blocked');
+    }
+
+    // Only set explicitActions if there are valid ones
+    if (validActions.length > 0) {
+      explicitActions = validActions;
+    }
+  }
+
   return {
     gateId: 'capability',
     status: 'pass',
     output: {
       allowedCapabilities: capabilities[stance] ?? [],
-      deniedCapabilities: [],
+      deniedCapabilities,
+      explicitActions,
     },
     action: 'continue',
     executionTimeMs: Date.now() - start,

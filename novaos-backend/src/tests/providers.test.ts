@@ -2,7 +2,7 @@
 // PROVIDER TESTS — LLM Abstraction Validation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { 
   MockProvider, 
   OpenAIProvider, 
@@ -91,7 +91,21 @@ describe('MockProvider', () => {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('OpenAIProvider', () => {
+  // Store original env values
+  const originalOpenAIKey = process.env.OPENAI_API_KEY;
+
+  afterEach(() => {
+    // Restore original env values
+    if (originalOpenAIKey !== undefined) {
+      process.env.OPENAI_API_KEY = originalOpenAIKey;
+    } else {
+      delete process.env.OPENAI_API_KEY;
+    }
+  });
+
   it('should not be available without API key', () => {
+    // Clear env var for this test
+    delete process.env.OPENAI_API_KEY;
     const provider = new OpenAIProvider(undefined);
     expect(provider.isAvailable()).toBe(false);
   });
@@ -102,6 +116,8 @@ describe('OpenAIProvider', () => {
   });
 
   it('should throw if generate called without initialization', async () => {
+    // Clear env var for this test
+    delete process.env.OPENAI_API_KEY;
     const provider = new OpenAIProvider(undefined);
     await expect(
       provider.generate('Hello', NOVA_SYSTEM_PROMPT)
@@ -114,7 +130,21 @@ describe('OpenAIProvider', () => {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('GeminiProvider', () => {
+  // Store original env values
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+
+  afterEach(() => {
+    // Restore original env values
+    if (originalGeminiKey !== undefined) {
+      process.env.GEMINI_API_KEY = originalGeminiKey;
+    } else {
+      delete process.env.GEMINI_API_KEY;
+    }
+  });
+
   it('should not be available without API key', () => {
+    // Clear env var for this test
+    delete process.env.GEMINI_API_KEY;
     const provider = new GeminiProvider(undefined);
     expect(provider.isAvailable()).toBe(false);
   });
@@ -125,6 +155,8 @@ describe('GeminiProvider', () => {
   });
 
   it('should throw if generate called without initialization', async () => {
+    // Clear env var for this test
+    delete process.env.GEMINI_API_KEY;
     const provider = new GeminiProvider(undefined);
     await expect(
       provider.generate('Hello', NOVA_SYSTEM_PROMPT)
@@ -137,7 +169,28 @@ describe('GeminiProvider', () => {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('ProviderManager', () => {
+  // Store original env values
+  const originalOpenAIKey = process.env.OPENAI_API_KEY;
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+
+  afterEach(() => {
+    // Restore original env values
+    if (originalOpenAIKey !== undefined) {
+      process.env.OPENAI_API_KEY = originalOpenAIKey;
+    } else {
+      delete process.env.OPENAI_API_KEY;
+    }
+    if (originalGeminiKey !== undefined) {
+      process.env.GEMINI_API_KEY = originalGeminiKey;
+    } else {
+      delete process.env.GEMINI_API_KEY;
+    }
+  });
+
   it('should fall back to mock when no API keys provided', () => {
+    // Clear env vars for this test
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
     const manager = new ProviderManager({});
     const providers = manager.getAvailableProviders();
     expect(providers).toContain('mock');
@@ -173,6 +226,9 @@ describe('ProviderManager', () => {
   });
 
   it('should generate using mock fallback', async () => {
+    // Clear env vars to ensure only mock is available
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
     const manager = new ProviderManager({});
     const response = await manager.generate('Hello', NOVA_SYSTEM_PROMPT);
     expect(response.text).toBeDefined();
