@@ -17,6 +17,7 @@ import {
   executeIntentGateAsync,
   executeShieldGate,
   executeLensGate,
+  executeLensGateAsync,  // ← NEW: Import async Lens gate
   executeStanceGate,
   executeCapabilityGate,
   executeModelGate,
@@ -46,6 +47,7 @@ const PIPELINE_TIMEOUT_MS = 30000;
 export interface PipelineConfig extends ProviderManagerConfig {
   useMockProvider?: boolean;
   systemPrompt?: string;
+  enableLensSearch?: boolean;  // ← NEW: Option to enable/disable Lens search
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -56,10 +58,12 @@ export class ExecutionPipeline {
   private providerManager: ProviderManager | null = null;
   private useMock: boolean;
   private systemPrompt: string;
+  private enableLensSearch: boolean;  // ← NEW
 
   constructor(config: PipelineConfig = {}) {
     this.useMock = config.useMockProvider ?? false;
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
+    this.enableLensSearch = config.enableLensSearch ?? true;  // ← NEW: Default enabled
 
     // Initialize provider manager if not using mock
     if (!this.useMock) {
@@ -160,8 +164,11 @@ export class ExecutionPipeline {
       }
     }
 
-    // ─── STAGE 3: LENS ───
-    state.gateResults.lens = executeLensGate(state, context);
+    // ─── STAGE 3: LENS (ASYNC - LLM POWERED WITH TIERED VERIFICATION) ───
+    // NEW: Use async LLM-powered Lens gate with tiered verification
+    state.gateResults.lens = await executeLensGateAsync(state, context, {
+      enableSearch: this.enableLensSearch,
+    });
     state.lensResult = state.gateResults.lens.output;
 
     // ─── STAGE 4: STANCE ───
@@ -230,7 +237,8 @@ export class ExecutionPipeline {
           requestId: context.requestId,
           totalTimeMs: Date.now() - pipelineStart,
           regenerations: regenerationCount,
-          degradationReason: `Unverified ${state.lensResult.domain} information`,
+          degradationReason: state.lensResult.message 
+            ?? `Unverified ${state.lensResult.domain ?? 'information'}`,
         },
       };
     }

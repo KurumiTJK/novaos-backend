@@ -35,6 +35,26 @@ export {
   type IntentGateResult,
 } from './intent-gate.js';
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// LLM-POWERED LENS GATE (NEW) — Tiered Verification System
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  executeLensGateAsync,
+  type LensGateConfig,
+  type TieredLensResult,
+  type LensClassification,
+  type SearchTier,
+  type VerificationStatus,
+  type LensConfidenceLevel,
+  type EvidencePack,
+  type EvidenceItem,
+  type VerifiedClaim,
+  type RiskFactor,
+  type DegradationReason,
+  type ReliabilityTier,
+} from './lens/index.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // INTENT GATE (LEGACY - SYNC)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -438,7 +458,8 @@ export async function executeShieldGate(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// LENS GATE
+// LENS GATE (LEGACY - SYNC) — Kept for backwards compatibility
+// For new code, use executeLensGateAsync from ./lens/index.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const FRESHNESS_DOMAINS = [
