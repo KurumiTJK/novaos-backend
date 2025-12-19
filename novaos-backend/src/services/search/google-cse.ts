@@ -116,11 +116,16 @@ export class GoogleCSEProvider implements SearchProvider {
       }
 
       const data = await response.json() as GoogleCSEResponse;
+      
+      console.log(`[GOOGLE_CSE] Raw response: ${data.items?.length ?? 0} items`);
+      if (data.items && data.items.length > 0) {
+        console.log(`[GOOGLE_CSE] Sample item: title="${data.items[0].title}", snippet length=${data.items[0].snippet?.length ?? 0}`);
+      }
 
       const results: SearchResult[] = (data.items ?? []).map(item => ({
         title: item.title,
         url: item.link,
-        snippet: item.snippet,
+        snippet: item.snippet || item.title || 'No content available', // Fallback chain
         source: item.displayLink,
         publishedAt: this.extractPublishedDate(item),
       }));

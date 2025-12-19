@@ -61,9 +61,22 @@ export class ExecutionPipeline {
   private enableLensSearch: boolean;  // ← NEW
 
   constructor(config: PipelineConfig = {}) {
-    this.useMock = config.useMockProvider ?? false;
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
-    this.enableLensSearch = config.enableLensSearch ?? true;  // ← NEW: Default enabled
+    this.enableLensSearch = config.enableLensSearch ?? true;
+    
+    // Determine mock mode:
+    // - If explicitly set in config, use that
+    // - If API keys provided in config, use real mode
+    // - Otherwise default to mock (safe for tests)
+    const hasConfigKeys = !!(config.openaiApiKey || config.geminiApiKey);
+    
+    if (config.useMockProvider !== undefined) {
+      this.useMock = config.useMockProvider;
+    } else if (hasConfigKeys) {
+      this.useMock = false;  // Config provided keys → use real mode
+    } else {
+      this.useMock = true;   // No config keys → default to mock (safe for tests)
+    }
 
     // Initialize provider manager if not using mock
     if (!this.useMock) {
@@ -165,11 +178,32 @@ export class ExecutionPipeline {
     }
 
     // ─── STAGE 3: LENS (ASYNC - LLM POWERED WITH TIERED VERIFICATION) ───
-    // NEW: Use async LLM-powered Lens gate with tiered verification
-    state.gateResults.lens = await executeLensGateAsync(state, context, {
-      enableSearch: this.enableLensSearch,
-    });
-    state.lensResult = state.gateResults.lens.output;
+    // Use async LLM-powered Lens gate only when:
+    // 1. Not in mock mode
+    // 2. Provider manager is available (has API keys)
+    // 3. OpenAI key is available (for LLM classification)
+    // 4. Lens search is enabled
+    const shouldUseAsyncLens = !this.useMock && 
+                               this.providerManager !== null &&
+                               !!process.env.OPENAI_API_KEY && 
+                               this.enableLensSearch !== false;
+    
+    if (shouldUseAsyncLens) {
+      try {
+        state.gateResults.lens = await executeLensGateAsync(state, context, {
+          enableSearch: this.enableLensSearch,
+        });
+        state.lensResult = state.gateResults.lens.output;
+      } catch (lensError) {
+        console.error('[PIPELINE] Lens gate error, falling back to sync:', lensError);
+        state.gateResults.lens = executeLensGate(state, context);
+        state.lensResult = state.gateResults.lens.output;
+      }
+    } else {
+      // Use sync Lens gate (pattern-based detection)
+      state.gateResults.lens = executeLensGate(state, context);
+      state.lensResult = state.gateResults.lens.output;
+    }
 
     // ─── STAGE 4: STANCE ───
     state.gateResults.stance = executeStanceGate(state, context);
@@ -182,6 +216,32 @@ export class ExecutionPipeline {
     // ─── STAGE 6-7: GENERATION LOOP ───
     let regenerationCount = 0;
 
+    // ─── INJECT LENS EVIDENCE INTO PROMPT ───
+    // If we have verified evidence, prepend it to the user message for the LLM
+    let augmentedMessage = state.userMessage;
+    const lensResult = state.lensResult as any;
+    
+    if (lensResult?.evidencePack?.items?.length > 0) {
+      const evidenceItems = lensResult.evidencePack.items;
+      
+      // Build evidence context - limit to top 5 most relevant sources
+      const evidenceLines = evidenceItems
+        .slice(0, 5)
+        .map((item: any, i: number) => {
+          const content = item.excerpt || item.snippet || '';
+          if (!content || content.length < 10) return null;
+          return `[Source ${i + 1}: ${item.title || item.url}]\n${content}`;
+        })
+        .filter(Boolean);
+      
+      if (evidenceLines.length > 0) {
+        const evidenceContext = evidenceLines.join('\n\n');
+        augmentedMessage = `IMPORTANT: Use the following verified real-time information to answer the user's question. Do NOT say you cannot provide real-time data - the data below was just retrieved:\n\n${evidenceContext}\n\n---\nUSER QUESTION: ${state.userMessage}`;
+        
+        console.log(`[PIPELINE] Injected ${evidenceLines.length} evidence sources into prompt`);
+      }
+    }
+
     while (regenerationCount <= MAX_REGENERATIONS) {
       // ─── STAGE 6: MODEL ───
       if (this.useMock || !this.providerManager) {
@@ -191,7 +251,7 @@ export class ExecutionPipeline {
           state,
           context,
           (prompt, systemPrompt, constraints) => 
-            this.providerManager!.generate(prompt, systemPrompt, constraints, {
+            this.providerManager!.generate(augmentedMessage, systemPrompt, constraints, {
               conversationHistory: context.conversationHistory,
             }),
           this.systemPrompt

@@ -28,6 +28,7 @@ export interface SearchResponse {
   provider: string;
   success: boolean;
   error?: string;
+  answer?: string;  // Tavily's synthesized answer
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ export interface SearchOptions {
   includeAnswer?: boolean;
   includeDomains?: string[];
   excludeDomains?: string[];
+  searchDepth?: 'basic' | 'advanced';  // Tavily: 'advanced' for HIGH tier
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

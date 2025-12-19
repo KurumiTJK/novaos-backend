@@ -72,8 +72,8 @@ export class TavilySearchProvider implements SearchProvider {
 
       const requestBody: TavilySearchRequest = {
         query,
-        search_depth: 'basic',
-        include_answer: options?.includeAnswer ?? false,
+        search_depth: options?.searchDepth ?? 'basic',  // Use 'advanced' for HIGH tier
+        include_answer: options?.includeAnswer ?? true,  // Always get synthesized answer
         max_results: options?.maxResults ?? 5,
       };
 
@@ -111,13 +111,34 @@ export class TavilySearchProvider implements SearchProvider {
       }
 
       const data = await response.json() as TavilySearchResponse;
+      
+      console.log(`[TAVILY] Raw response: ${data.results.length} results, answer=${data.answer ? 'yes' : 'no'}`);
+      if (data.answer) {
+        console.log(`[TAVILY] Synthesized answer: ${data.answer.substring(0, 100)}...`);
+      }
+      if (data.results.length > 0) {
+        console.log(`[TAVILY] Sample result: title="${data.results[0].title}", content length=${data.results[0].content?.length ?? 0}`);
+      }
 
-      const results: SearchResult[] = data.results.map(r => ({
+      const results: SearchResult[] = [];
+      
+      // Add Tavily's synthesized answer as the first result if available
+      if (data.answer) {
+        results.push({
+          title: 'Tavily AI Summary (Real-time)',
+          url: 'https://tavily.com',
+          snippet: data.answer,
+          source: 'tavily-answer',
+        });
+      }
+      
+      // Add regular search results
+      results.push(...data.results.map(r => ({
         title: r.title,
         url: r.url,
-        snippet: r.content.slice(0, 500), // Limit snippet length
+        snippet: r.content?.slice(0, 500) || r.title || 'No content available',
         publishedAt: r.published_date,
-      }));
+      })));
 
       return {
         query,
@@ -126,6 +147,7 @@ export class TavilySearchProvider implements SearchProvider {
         retrievedAt: new Date().toISOString(),
         provider: this.name,
         success: true,
+        answer: data.answer, // Include the synthesized answer
       };
 
     } catch (error) {

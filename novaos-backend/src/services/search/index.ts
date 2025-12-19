@@ -96,16 +96,26 @@ export class SearchManager {
     // Parallel search from all available providers
     const promises: Promise<SearchResponse>[] = [];
 
-    if (this.tavily.isAvailable()) {
-      promises.push(this.tavily.search(query, searchOptions));
+    const tavilyAvailable = this.tavily.isAvailable();
+    const googleAvailable = this.googleCSE.isAvailable();
+    
+    console.log(`[SEARCH] Providers available: tavily=${tavilyAvailable}, google=${googleAvailable}`);
+
+    if (tavilyAvailable) {
+      // Use advanced depth for HIGH tier queries
+      promises.push(this.tavily.search(query, {
+        ...searchOptions,
+        searchDepth: 'advanced',
+        includeAnswer: true,
+      }));
     }
 
-    if (this.googleCSE.isAvailable()) {
+    if (googleAvailable) {
       promises.push(this.googleCSE.search(query, searchOptions));
     }
 
     // If official sources required, also search with restricted domains
-    if (options?.requireOfficial && this.googleCSE.isAvailable()) {
+    if (options?.requireOfficial && googleAvailable) {
       promises.push(
         this.googleCSE.search(query, {
           ...searchOptions,
@@ -114,11 +124,25 @@ export class SearchManager {
       );
     }
 
+    if (promises.length === 0) {
+      console.warn('[SEARCH] No search providers available!');
+      return {
+        query,
+        results: [],
+        retrievedAt: new Date().toISOString(),
+        provider: 'none',
+        success: false,
+        error: 'No search providers available',
+      };
+    }
+
     const results = await Promise.allSettled(promises);
 
     for (const result of results) {
       if (result.status === 'fulfilled' && result.value.success) {
         responses.push(result.value);
+      } else if (result.status === 'rejected') {
+        console.error('[SEARCH] Provider error:', result.reason);
       }
     }
 
@@ -150,14 +174,27 @@ export class SearchManager {
     const deduped = this.mergeAndDedupeResults(response.results);
 
     const items: EvidenceItem[] = deduped.map(r => ({
-      title: r.title,
+      title: r.title || 'Untitled',
       url: r.url,
-      excerpt: r.snippet,
+      excerpt: r.snippet || r.title || 'No content available',
       reliability: getReliabilityTier(r.url),
       publishedAt: r.publishedAt,
       retrievedAt: response.retrievedAt,
       isOfficial: isOfficialSource(r.url),
     }));
+
+    // Calculate total reliability weight
+    const reliabilityWeights: Record<string, number> = {
+      'tier1_official': 1.0,
+      'tier2_news': 0.8,
+      'tier3_established': 0.6,
+      'tier4_general': 0.4,
+      'tier5_unverified': 0.2,
+    };
+    
+    const totalWeight = items.reduce((sum, item) => {
+      return sum + (reliabilityWeights[item.reliability] ?? 0.3);
+    }, 0);
 
     return {
       query: response.query,
@@ -166,6 +203,7 @@ export class SearchManager {
       items,
       deduped: originalCount !== deduped.length,
       duplicatesRemoved: originalCount - deduped.length,
+      totalWeight,
     };
   }
 
@@ -185,8 +223,11 @@ export class SearchManager {
       } else {
         // Keep the one with more complete data
         const existing = seen.get(normalizedUrl)!;
+        const existingSnippetLength = existing.snippet?.length ?? 0;
+        const resultSnippetLength = result.snippet?.length ?? 0;
+        
         if (
-          result.snippet.length > existing.snippet.length ||
+          resultSnippetLength > existingSnippetLength ||
           (result.publishedAt && !existing.publishedAt)
         ) {
           seen.set(normalizedUrl, result);

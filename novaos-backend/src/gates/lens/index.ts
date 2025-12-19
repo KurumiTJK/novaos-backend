@@ -170,7 +170,10 @@ export async function executeLensGateAsync(
   } catch (error) {
     console.error('[LENS] Error:', error);
     
-    // Fail open - return LOW tier result
+    // Try to detect domain even in error case
+    const domain = detectDomain(message);
+    
+    // Fail open - return LOW tier result with proper backwards compatibility
     return {
       gateId: 'lens',
       status: 'pass',
@@ -187,6 +190,7 @@ export async function executeLensGateAsync(
         stakes: 'low',
         needsVerification: false,
         verified: true,
+        domain,
         message: 'Lens classification failed - proceeding with model knowledge',
       },
       action: 'continue',
@@ -304,12 +308,15 @@ async function executeHighTier(
   };
 
   for (const query of searchQueries.slice(0, 3)) { // Limit to 3 queries
+    console.log(`[LENS] HIGH tier - searching: "${query}"`);
     const response = await searchManager.searchHigh(query, {
       maxResults: 10,
       timeoutMs: 5000,
       requireOfficial: true,
     });
 
+    console.log(`[LENS] HIGH tier - search result: success=${response.success}, results=${response.results.length}, provider=${response.provider}`);
+    
     if (response.success) {
       allResults.results.push(...response.results);
       allResults.success = true;
@@ -324,8 +331,22 @@ async function executeHighTier(
     return true;
   });
 
+  console.log(`[LENS] HIGH tier - total unique results: ${allResults.results.length}`);
+  
+  // Debug: log first few results to verify snippets exist
+  if (allResults.results.length > 0) {
+    console.log(`[LENS] HIGH tier - sample result: title="${allResults.results[0].title}", snippet length=${allResults.results[0].snippet?.length ?? 0}`);
+  }
+
   // Build evidence pack
   const evidencePack = searchManager.buildEvidencePack(allResults, 'high');
+  
+  console.log(`[LENS] HIGH tier - evidence pack: ${evidencePack.items.length} items, weight=${(evidencePack.totalWeight ?? 0).toFixed(2)}`);
+  
+  // Debug: verify excerpts exist
+  if (evidencePack.items.length > 0) {
+    console.log(`[LENS] HIGH tier - sample evidence: excerpt length=${evidencePack.items[0].excerpt?.length ?? 0}`);
+  }
 
   // ─── STEP 3: PROCESS EVIDENCE ───
   const processedEvidence = processEvidence(evidencePack);

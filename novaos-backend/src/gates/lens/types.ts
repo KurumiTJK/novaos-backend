@@ -122,6 +122,7 @@ export interface EvidencePack {
   items: EvidenceItem[];
   deduped: boolean;
   duplicatesRemoved: number;
+  totalWeight?: number;  // Sum of reliability weights
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

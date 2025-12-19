@@ -675,8 +675,13 @@ export function buildModelConstraints(state: PipelineState): GenerationConstrain
     tone: state.stance === 'control' ? 'compassionate' : 'professional',
   };
 
-  // Add freshness restrictions if lens detected time-sensitive content
-  if (state.lensResult?.needsVerification && !state.lensResult?.verified) {
+  // NOTE: Evidence injection is now handled in the execution pipeline
+  // by augmenting the user message directly before calling the model gate.
+  // This ensures evidence goes to the LLM prompt, not the user response.
+
+  // Add freshness restrictions if lens detected time-sensitive content but couldn't verify
+  const lensResult = state.lensResult as any;
+  if (lensResult?.needsVerification && !lensResult?.verified && !lensResult?.evidencePack?.items?.length) {
     constraints.numericPrecisionAllowed = false;
     constraints.mustInclude = ['Note: I cannot verify current'];
   }
@@ -702,12 +707,11 @@ export function executeModelGate(
     ?? MOCK_RESPONSES.default 
     ?? 'I understand your request.';
 
-  // Apply mustPrepend
-  if (constraints.mustPrepend) {
-    text = constraints.mustPrepend + '\n\n' + text;
-  }
+  // NOTE: mustPrepend is for the PROMPT to the LLM, not the OUTPUT to the user
+  // In mock mode, we just generate a generic response
+  // The real async gate will use mustPrepend in the actual LLM call
 
-  // Apply mustInclude
+  // Apply mustInclude (these ARE user-facing notices)
   if (constraints.mustInclude) {
     text += '\n\n' + constraints.mustInclude.join(' ');
   }
