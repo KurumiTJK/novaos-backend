@@ -490,3 +490,98 @@ export {
 export type { LensGateResult, LensMode, EvidencePack, RetrievalOutcome } from '../../types/lens.js';
 export type { DataNeedClassification, TruthMode, FallbackMode } from '../../types/data-need.js';
 export type { LiveCategory, AuthoritativeCategory, DataCategory } from '../../types/categories.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// COMPATIBILITY LAYER EXPORTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  toLegacyLensResult,
+  getFullLensResult,
+  hasExtendedData,
+  type ExtendedLensResult,
+  type LegacyEvidencePack,
+  type LegacyEvidenceItem,
+} from './compatibility.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PIPELINE-COMPATIBLE ASYNC EXPORT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import type { LensResult, GateResult as PipelineGateResult } from '../../types/index.js';
+import { toLegacyLensResult, type ExtendedLensResult } from './compatibility.js';
+
+/**
+ * Pipeline-compatible interface for Lens gate configuration.
+ */
+export interface TieredLensConfig {
+  readonly enableSearch?: boolean;
+  readonly userTimezone?: string;
+  readonly userLocation?: string;
+}
+
+/**
+ * Alias types for backward compatibility with existing pipeline.
+ */
+export type TieredLensResult = ExtendedLensResult;
+export type LensClassification = DataNeedClassification;
+export type SearchTier = 'official' | 'authoritative' | 'general';
+export type VerificationStatus = 'verified' | 'degraded' | 'stopped';
+export type LensConfidenceLevel = 'high' | 'medium' | 'low';
+export type EvidenceItem = { title: string; url?: string; excerpt?: string; snippet?: string };
+export type VerifiedClaim = { claim: string; verified: boolean; source?: string };
+export type RiskFactor = { factor: string; severity: 'low' | 'medium' | 'high' };
+export type DegradationReason = string;
+export type ReliabilityTier = 'feed' | 'official' | 'aggregator';
+
+/**
+ * Execute the Lens gate asynchronously with pipeline-compatible output.
+ * 
+ * This is the main entry point for the execution pipeline.
+ * It wraps the Phase 7 Lens gate and converts the output to the legacy
+ * LensResult format expected by the pipeline.
+ * 
+ * @param state - Current pipeline state
+ * @param context - Pipeline context
+ * @param config - Optional configuration
+ * @returns Gate result with legacy-compatible LensResult (extended)
+ */
+export async function executeLensGateAsync(
+  state: PipelineState,
+  context: PipelineContext,
+  config: TieredLensConfig = {}
+): Promise<PipelineGateResult<ExtendedLensResult>> {
+  // Map config to LensGateConfig
+  const lensConfig: LensGateConfig = {
+    enableLiveData: config.enableSearch ?? true,
+    userTimezone: config.userTimezone ?? context.timezone,
+    userLocation: config.userLocation,
+    enableTracing: true,
+    logTrace: false,
+  };
+  
+  // Execute the Phase 7 Lens gate
+  const result = await executeLensGate(state, context, lensConfig);
+  
+  // Convert to legacy-compatible format
+  const legacyResult = toLegacyLensResult(result.output);
+  
+  // Map action from Phase 7 to pipeline GateAction
+  let action: 'continue' | 'regenerate' | 'stop' | 'await_ack' | 'degrade';
+  switch (result.action) {
+    case 'halt':
+      action = 'stop';
+      break;
+    default:
+      action = result.action as any ?? 'continue';
+  }
+  
+  return {
+    gateId: 'lens',
+    status: result.status,
+    output: legacyResult,
+    action,
+    executionTimeMs: result.executionTimeMs,
+    failureReason: result.failureReason,
+  };
+}
