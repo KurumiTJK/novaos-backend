@@ -408,11 +408,14 @@ async function fetchCategory(
     // Get the query from entity, with special handling for time queries
     let query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
     
-    // For time queries with no entity, use userTimezone as fallback (default to PST/Irvine)
-    if (category === 'time' && !query) {
-      const fallbackTimezone = userTimezone || 'America/Los_Angeles';
-      query = fallbackTimezone;
-      console.log(`[FETCH] Using timezone fallback: "${fallbackTimezone}"`);
+    // For time queries, handle special cases that mean "local time"
+    if (category === 'time') {
+      const lowerQuery = query.toLowerCase();
+      if (!query || lowerQuery === 'local' || lowerQuery === 'here' || lowerQuery === 'now') {
+        const fallbackTimezone = userTimezone || 'America/Los_Angeles';
+        query = fallbackTimezone;
+        console.log(`[FETCH] Using timezone fallback: "${fallbackTimezone}"`);
+      }
     }
     
     console.log(`[FETCH] Query: "${query}"`);
