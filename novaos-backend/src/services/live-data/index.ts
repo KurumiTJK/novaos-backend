@@ -1,180 +1,193 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// LIVE DATA MODULE — Leak Guard & Validation
-// Phase 5: Leak Guard
+// LIVE DATA MODULE — Evidence, Injection & Leak Guard
+// Phase 5: Leak Guard + Phase 6: Evidence & Injection
 // 
-// This module provides numeric leak prevention for live data responses.
-// It ensures that model output only contains verified numbers from providers
-// or explicitly exempted patterns.
+// This module provides:
+// 1. Evidence formatting and injection (Phase 6)
+// 2. Numeric token extraction (Phase 6)
+// 3. Failure semantics (Phase 6)
+// 4. Constraint building (Phase 6)
+// 5. Leak guard validation (Phase 5)
 // 
-// USAGE:
+// TYPICAL USAGE FLOW:
 // 
-//   import { validateModelOutput, PostModelValidationResult } from './live-data';
+//   // 1. Determine failure semantics
+//   const semantics = getFailureSemantics(truthMode, category, providerStatus, fallbackMode);
 //   
-//   const result = validateModelOutput(modelOutput, constraints, category, {
-//     entity: 'AAPL',
-//   });
+//   // 2. Build constraints
+//   const { constraints } = buildConstraints(semantics, providerResult, category);
 //   
-//   if (result.wasReplaced) {
-//     console.log('Response replaced due to leak detection');
-//   }
+//   // 3. Build augmented message with evidence
+//   const { augmentedMessage, evidencePack } = buildAugmentedMessage(
+//     userQuery, providerResults, constraints
+//   );
 //   
-//   return result.response;
+//   // 4. Send to model... get response
+//   const modelResponse = await model.generate(augmentedMessage);
+//   
+//   // 5. Validate response with leak guard
+//   const validation = validateModelOutput(modelResponse, constraints, category);
+//   
+//   // 6. Return safe response
+//   return validation.response;
 // 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// MAIN EXPORTS — Post-Model Validation
+// PHASE 6: EVIDENCE & INJECTION
 // ─────────────────────────────────────────────────────────────────────────────────
 
+// Failure Semantics — Central failure handling
 export {
-  // Main validation function
-  validateModelOutput,
-  validateMultiCategory,
-  
-  // Quick checks
-  wouldPassValidation,
-  isForbidMode,
-  isAllowlistMode,
-  
-  // Debug
-  getDebugInfo,
-  
-  // Re-exports from leak-guard
-  checkNumericLeak,
-  getResultSummary,
-  isCriticalFailure,
-  
-  // Types
-  type PostModelValidationResult,
-  type PostModelValidationOptions,
-  type ValidationTelemetry,
-} from './post-model-validation.js';
+  getFailureSemantics,
+  combineSemantics,
+  validateSemantics,
+  validateFailureSemanticsMatrix,
+  canProceed,
+  allowsNumeric,
+  isErrorState,
+  getConstraintDescription,
+  createVerifiedSemantics,
+  createStaleSemantics,
+  createInsufficientSemantics,
+  createInvalidStateSemantics,
+  type FailureSemantics,
+  type ProviderStatus,
+  type ConstraintLevel,
+  type ModelProceedStatus,
+} from './failure-semantics.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// LEAK GUARD — Core Detection Engine
-// ─────────────────────────────────────────────────────────────────────────────────
-
+// Constraints Builder — Build ResponseConstraints
 export {
-  // Mode-specific checks
-  checkLeakForbidMode,
-  checkLeakAllowlistMode,
-  
-  // Utilities
-  getViolationMatches,
-  
-  // Context keywords (for debugging)
-  CONTEXT_KEYWORDS,
-  
-  // Types
-  type LeakGuardMode,
-  type LeakViolation,
-  type LeakGuardResult,
-  type LeakGuardTrace,
-} from './leak-guard.js';
+  buildConstraints,
+  buildInsufficientConstraints,
+  buildQualitativeConstraints,
+  buildForbidNumericConstraints,
+  buildLiveDataConstraints,
+  buildPermissiveConstraints,
+  buildMultiProviderConstraints,
+  validateConstraints,
+  QUOTE_EVIDENCE_EXEMPTIONS,
+  FORBID_NUMERIC_EXEMPTIONS,
+  QUALITATIVE_EXEMPTIONS,
+  NO_EXEMPTIONS,
+  PERMISSIVE_EXEMPTIONS,
+  UNIVERSAL_BANNED_PHRASES,
+  type ConstraintBuildOptions,
+  type ConstraintBuildResult,
+} from './constraints-builder.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// LEAK PATTERNS — Numeric Detection
-// ─────────────────────────────────────────────────────────────────────────────────
-
+// Numeric Tokens — Extract tokens from provider data
 export {
-  // Pattern access
-  getPattern,
-  getAllPatterns,
-  getPatternDescription,
-  getAllPatternKeys,
-  getPatternsByCategory,
-  
-  // Pattern matching
-  findAllMatches,
-  hasAnyNumeric,
-  isAlwaysExemptPattern,
-  
-  // Pattern groups
-  PRIORITY_PATTERNS,
-  SECONDARY_PATTERNS,
-  TERTIARY_PATTERNS,
-  ALWAYS_EXEMPT_PATTERNS,
-  
-  // Combined patterns
-  ANY_NUMERIC_PATTERN,
-  SPELLED_NUMBER_PATTERN,
-  
-  // Pattern categories
-  PATTERN_CATEGORIES,
-  
-  // Types
-  type LeakPatternKey,
-  type PatternCategory,
-} from './leak-patterns.js';
+  formatStockData,
+  formatFxData,
+  formatCryptoData,
+  formatWeatherData,
+  formatTimeData,
+  formatProviderData,
+  extractTokensFromData,
+  buildTokenSet,
+  mergeTokenSets,
+  buildTokenSetFromData,
+  formatMultipleData,
+  createTokenKey,
+  type FormattedDataResult,
+  type TokenExtractionOptions,
+} from './numeric-tokens.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// LEAK EXEMPTIONS — Allowed Patterns
-// ─────────────────────────────────────────────────────────────────────────────────
-
+// Evidence Injection — Inject evidence into model prompt
 export {
-  // Exemption checking
-  isExempted,
-  checkExemptions,
-  filterNonExempted,
-  
-  // Context utilities
-  getSurroundingContext,
-  isFinancialContext,
-  getExemptionsForContext,
-  
-  // Exemption builders
-  withCustomPatterns,
-  allowSpecificNumber,
-  
-  // Presets
-  GENERAL_EXEMPTIONS,
-  FINANCIAL_EXEMPTIONS,
-  MINIMAL_EXEMPTIONS,
-  
-  // Pattern exports (for testing)
-  YEAR_PATTERN,
-  ORDINAL_PATTERN,
-  STEP_NUMBER_PATTERN,
-  VERSION_PATTERN,
-  CODE_BLOCK_PATTERN,
-  INLINE_CODE_PATTERN,
-  QUOTED_TEXT_PATTERN,
-  ISO_TIMESTAMP_PATTERN,
-  PHONE_NUMBER_PATTERN,
-  IP_ADDRESS_PATTERN,
-  
-  // Types
-  type ExemptionReason,
-  type ExemptionResult,
-  type MatchWithExemption,
-} from './leak-exemptions.js';
+  buildEvidencePack,
+  buildSingleEvidencePack,
+  buildEvidenceXml,
+  injectEvidence,
+  buildAugmentedMessage,
+  buildDegradedMessage,
+  buildQualitativeMessage,
+  buildPartialDataMessage,
+  validateInjection,
+  getSystemInstructions,
+  QUOTE_EVIDENCE_INSTRUCTIONS,
+  FORBID_NUMERIC_INSTRUCTIONS,
+  QUALITATIVE_INSTRUCTIONS,
+  STALE_DATA_INSTRUCTIONS,
+  type EvidenceInjectionOptions,
+  type AugmentedMessageResult,
+  type FreshnessStatus,
+} from './evidence-injection.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// LEAK RESPONSE — Safe Fallbacks
-// ─────────────────────────────────────────────────────────────────────────────────
-
+// Formatting — Deterministic number formatting
 export {
-  // Response builders
-  getSafeResponse,
-  buildSafeResponse,
-  buildContextualSafeResponse,
-  buildPartialResponse,
-  
-  // Invalid state
-  getInvalidStateResponse,
-  INVALID_STATE_RESPONSE,
-  
-  // Validation
-  validateSafeResponse,
-  validateAllTemplates,
-  getAllSafeResponses,
-  
-  // Templates
-  SAFE_RESPONSE_TEMPLATES,
-} from './leak-response.js';
+  formatWithCommas,
+  formatCurrency,
+  formatPercent,
+  formatCurrencyChange,
+  formatTemperature,
+  formatTemperatureDual,
+  formatSpeed,
+  formatWindSpeed,
+  formatTime12,
+  formatTime24,
+  formatTimeWithZone,
+  formatPressure,
+  formatHumidity,
+  formatUvIndex,
+  formatVisibility,
+  formatLargeNumber,
+  formatMarketCap,
+  formatVolume,
+  formatExchangeRate,
+  formatRate,
+  formatCryptoPrice,
+  formatSupply,
+  getDecimalPlaces,
+  roundToSignificant,
+  shouldAbbreviate,
+  CURRENCY_SYMBOLS,
+  CURRENCY_DECIMALS,
+  type TemperatureUnit,
+  type SpeedUnit,
+} from './formatting.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RE-EXPORTS FROM DEPENDENCIES
+// PHASE 5: LEAK GUARD (Re-exports)
+// These would be imported from Phase 5 files in a full implementation
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// NOTE: Phase 5 exports would be included here when integrated
+// For now, we define the expected interface
+
+/**
+ * Phase 5 Leak Guard exports (to be integrated):
+ * 
+ * - validateModelOutput
+ * - validateMultiCategory
+ * - wouldPassValidation
+ * - isForbidMode
+ * - isAllowlistMode
+ * - getDebugInfo
+ * - checkNumericLeak
+ * - getResultSummary
+ * - isCriticalFailure
+ * - checkLeakForbidMode
+ * - checkLeakAllowlistMode
+ * - getViolationMatches
+ * - CONTEXT_KEYWORDS
+ * - getPattern
+ * - findAllMatches
+ * - hasAnyNumeric
+ * - isAlwaysExemptPattern
+ * - isExempted
+ * - checkExemptions
+ * - filterNonExempted
+ * - getSafeResponse
+ * - buildContextualSafeResponse
+ * - getInvalidStateResponse
+ * - validateAllTemplates
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// TYPE RE-EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 // Re-export constraint types for convenience
@@ -184,34 +197,144 @@ export type {
   NumericExemptions,
   ResponseConstraints,
   NumericContextKey,
-  ConstraintLevel,
+  ConstraintLevel as ResponseConstraintLevel,
 } from '../../types/constraints.js';
 
-// Re-export constraint builders
-export {
-  createDefaultConstraints,
-  createStrictConstraints,
-  createDegradedConstraints,
-  createTokenKey,
-  isExemptNumber,
-  isNumericContextKey,
-  VALID_NUMERIC_CONTEXT_KEYS,
-  DEFAULT_EXEMPTIONS,
-  STRICT_EXEMPTIONS,
-  NO_EXEMPTIONS,
-} from '../../types/constraints.js';
+// Re-export provider types
+export type {
+  ProviderData,
+  StockData,
+  FxData,
+  CryptoData,
+  WeatherData,
+  TimeData,
+  ProviderResult,
+  ProviderOkResult,
+  ProviderErrResult,
+  ProviderError,
+  ProviderErrorCode,
+  FreshnessPolicy,
+} from '../../types/provider-results.js';
 
-// Re-export canonicalization utilities
-export {
-  canonicalizeNumeric,
-  extractNumericValue,
-  numericEquals,
-  numericApproxEquals,
-  generateCanonicalVariants,
-  extractAllNumbers,
-  isNumericString,
-  formatNumeric,
-} from '../../utils/canonicalize.js';
+// Re-export lens types
+export type {
+  EvidencePack,
+  ContextItem,
+  ContextSource,
+  RetrievalStatus,
+  RetrievalOutcome,
+  LensGateResult,
+  LensMode,
+} from '../../types/lens.js';
+
+// Re-export data-need types
+export type {
+  TruthMode,
+  FallbackMode,
+  DataNeedClassification,
+  ClassificationConfidence,
+} from '../../types/data-need.js';
 
 // Re-export LiveCategory
 export type { LiveCategory } from '../../types/categories.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONVENIENCE FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { getFailureSemantics } from './failure-semantics.js';
+import { buildConstraints } from './constraints-builder.js';
+import { buildAugmentedMessage } from './evidence-injection.js';
+import type { LiveCategory } from '../../types/categories.js';
+import type { TruthMode, FallbackMode } from '../../types/data-need.js';
+import type { ProviderResult } from '../../types/provider-results.js';
+import type { ResponseConstraints } from '../../types/constraints.js';
+
+/**
+ * Complete pipeline: semantics → constraints → augmented message.
+ * 
+ * This is the main convenience function for the typical use case.
+ * 
+ * @param userQuery - Original user query
+ * @param truthMode - How data was supposed to be sourced
+ * @param category - Primary live data category
+ * @param providerResult - Provider result (success or failure)
+ * @param fallbackMode - Configured fallback mode
+ * @returns Augmented message result with constraints
+ */
+export function processLiveDataRequest(
+  userQuery: string,
+  truthMode: TruthMode,
+  category: LiveCategory,
+  providerResult: ProviderResult,
+  fallbackMode: FallbackMode
+): {
+  augmentedMessage: string;
+  constraints: ResponseConstraints;
+  canProceed: boolean;
+  reason: string;
+} {
+  // 1. Determine failure semantics
+  const providerStatus = providerResult.ok ? 'verified' : 'failed';
+  const semantics = getFailureSemantics(truthMode, category, providerStatus, fallbackMode);
+  
+  // 2. Check if we can proceed
+  if (semantics.proceed === 'refuse') {
+    return {
+      augmentedMessage: userQuery, // Return original - will be handled by caller
+      constraints: buildConstraints(semantics, null, category).constraints,
+      canProceed: false,
+      reason: semantics.reason,
+    };
+  }
+  
+  // 3. Build constraints
+  const { constraints } = buildConstraints(
+    semantics,
+    providerResult.ok ? providerResult : null,
+    category
+  );
+  
+  // 4. Build augmented message
+  const providerResults = new Map<LiveCategory, ProviderResult>();
+  providerResults.set(category, providerResult);
+  
+  const { augmentedMessage } = buildAugmentedMessage(
+    userQuery,
+    providerResults,
+    constraints
+  );
+  
+  return {
+    augmentedMessage,
+    constraints,
+    canProceed: true,
+    reason: semantics.reason,
+  };
+}
+
+/**
+ * Quick check if a category+status combination allows numeric precision.
+ */
+export function allowsNumericPrecision(
+  truthMode: TruthMode,
+  category: LiveCategory,
+  providerStatus: 'verified' | 'stale' | 'degraded' | 'failed',
+  fallbackMode: FallbackMode
+): boolean {
+  const semantics = getFailureSemantics(truthMode, category, providerStatus, fallbackMode);
+  return semantics.numericPrecisionAllowed;
+}
+
+/**
+ * Quick check if a request should be refused (insufficient data).
+ */
+export function shouldRefuse(
+  truthMode: TruthMode,
+  category: LiveCategory,
+  providerStatus: 'verified' | 'stale' | 'degraded' | 'failed',
+  fallbackMode: FallbackMode
+): boolean {
+  const semantics = getFailureSemantics(truthMode, category, providerStatus, fallbackMode);
+  return semantics.proceed === 'refuse';
+}
