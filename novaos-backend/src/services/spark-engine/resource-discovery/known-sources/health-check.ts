@@ -18,6 +18,7 @@
 
 import { getLogger } from '../../../../observability/logging/index.js';
 import { incCounter, observeHistogram } from '../../../../observability/metrics/index.js';
+import { ssrfSafeFetch, type SSRFSafeFetchOptions } from '../../../../security/ssrf/index.js';
 import type { KnownSource, HealthStatus } from './registry.js';
 import { getKnownSourcesRegistry } from './registry.js';
 
@@ -225,62 +226,64 @@ export class HealthChecker {
     const timeoutMs = (source.healthCheck.timeoutSeconds || this.config.defaultTimeoutSeconds) * 1000;
     
     try {
-      // Create abort controller for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      // Use SSRF-safe client for health checks
+      const fetchOptions: SSRFSafeFetchOptions = {
+        method: 'HEAD',
+        timeoutMs,
+        headers: {
+          'User-Agent': 'NovaOS-HealthChecker/1.0',
+        },
+        // Health checks are for known, pre-verified sources
+        allowPrivateIPs: false,
+        maxRedirects: 3,
+      };
       
-      try {
-        // Perform HEAD request
-        const response = await fetch(source.healthCheck.url, {
-          method: 'HEAD',
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'NovaOS-HealthChecker/1.0',
-          },
-        });
-        
-        clearTimeout(timeoutId);
-        
-        const responseTimeMs = Date.now() - startTime;
-        
-        // Determine status based on HTTP code and response time
-        let status: HealthStatus;
-        if (response.ok) {
-          // Consider degraded if response time is high
-          if (responseTimeMs > timeoutMs * 0.8) {
-            status = 'degraded';
-          } else {
-            status = 'healthy';
-          }
-        } else if (response.status >= 500) {
-          status = 'unhealthy';
-        } else if (response.status === 429) {
-          status = 'degraded'; // Rate limited
-        } else {
-          status = 'unhealthy';
-        }
-        
+      const result = await ssrfSafeFetch(source.healthCheck.url, fetchOptions);
+      const responseTimeMs = Date.now() - startTime;
+      
+      if (!result.ok) {
+        // SSRF client returned an error (blocked, timeout, etc.)
         return {
           sourceId: source.id,
-          status,
-          httpStatus: response.status,
+          status: 'unhealthy',
           responseTimeMs,
+          error: result.error.message,
           checkedAt,
         };
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        throw fetchError;
       }
+      
+      const response = result.value;
+      
+      // Determine status based on HTTP code and response time
+      let status: HealthStatus;
+      if (response.ok) {
+        // Consider degraded if response time is high
+        if (responseTimeMs > timeoutMs * 0.8) {
+          status = 'degraded';
+        } else {
+          status = 'healthy';
+        }
+      } else if (response.status >= 500) {
+        status = 'unhealthy';
+      } else if (response.status === 429) {
+        status = 'degraded'; // Rate limited
+      } else {
+        status = 'unhealthy';
+      }
+      
+      return {
+        sourceId: source.id,
+        status,
+        httpStatus: response.status,
+        responseTimeMs,
+        checkedAt,
+      };
     } catch (error) {
       const responseTimeMs = Date.now() - startTime;
       
       let errorMessage: string;
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          errorMessage = 'Request timeout';
-        } else {
-          errorMessage = error.message;
-        }
+        errorMessage = error.message;
       } else {
         errorMessage = 'Unknown error';
       }
