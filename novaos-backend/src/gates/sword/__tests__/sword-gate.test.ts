@@ -5,10 +5,10 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { createUserId, createGoalId, createTimestamp } from '../../types/branded.js';
-import { ok, err, appError } from '../../types/result.js';
+import { createUserId, createGoalId, createTimestamp } from '../../../types/branded.js';
+import { ok, err, appError } from '../../../types/result.js';
 
-import type { SwordRefinementState, SwordRefinementInputs, SwordGateConfig } from './types.js';
+import type { SwordRefinementState, SwordRefinementInputs, SwordGateConfig } from '../types.js';
 import {
   DEFAULT_SWORD_GATE_CONFIG,
   hasRequiredFields,
@@ -16,13 +16,13 @@ import {
   calculateRefinementProgress,
   isSwordGateMode,
   isRefinementField,
-} from './types.js';
+} from '../types.js';
 
-import { ModeDetector, createModeDetector } from './mode-detector.js';
-import { RefinementFlow, createRefinementFlow } from './refinement-flow.js';
-import { GoalStatementSanitizer, createGoalStatementSanitizer, sanitizeGoalStatement } from './sanitizers.js';
-import { LessonPlanGenerator, createLessonPlanGenerator } from './lesson-plan-generator.js';
-import { InMemoryGoalRateLimiter, createInMemoryGoalRateLimiter } from './rate-limiter.js';
+import { ModeDetector, createModeDetector } from '../mode-detector.js';
+import { RefinementFlow, createRefinementFlow } from '../refinement-flow.js';
+import { GoalStatementSanitizer, createGoalStatementSanitizer, sanitizeGoalStatement } from '../sanitizers.js';
+import { LessonPlanGenerator, createLessonPlanGenerator } from '../lesson-plan-generator.js';
+import { InMemoryGoalRateLimiter, createInMemoryGoalRateLimiter } from '../rate-limiter.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST HELPERS

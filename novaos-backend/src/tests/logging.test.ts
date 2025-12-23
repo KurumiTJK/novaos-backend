@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Logger, getLogger, loggers } from '../logging/index.js';
+import { Logger, getLogger, loggers } from '../observability/logging/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER TESTS

@@ -10,7 +10,7 @@
 // - Request correlation IDs
 //
 // Backward Compatible API:
-//   import { getLogger, logRequest } from './logging/index.js';
+//   import { Logger, getLogger, loggers } from './logging/index.js';
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -100,8 +100,14 @@ export {
   type LogLevel,
   type LoggerConfig,
   type LoggerOptions,
-  type Logger,
+  type ILogger,
   type RequestLogData,
+  
+  // Class (for `new Logger()` usage)
+  Logger,
+  
+  // Pre-created component loggers
+  loggers,
   
   // Constants
   LOG_LEVELS,

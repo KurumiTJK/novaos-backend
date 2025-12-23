@@ -12,14 +12,14 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { RedisClientType } from 'redis';
+import type { Redis } from 'ioredis';
 
 import type { UserId } from '../../types/branded.js';
 import { createTimestamp } from '../../types/branded.js';
 import type { AsyncAppResult } from '../../types/result.js';
 import { ok, err, appError } from '../../types/result.js';
 
-import { buildKey, KeyNamespace, RateLimitKeys } from '../../helpers/keys.js';
+import { buildKey, KeyNamespace, RateLimitKeys } from '../../infrastructure/redis/keys.js';
 import type { GoalRateLimitInfo, SwordGateConfig } from './types.js';
 import type { IGoalRateLimiter } from './sword-gate.js';
 
@@ -87,10 +87,10 @@ function creationCooldownKey(userId: UserId): string {
  * Redis-backed goal creation rate limiter.
  */
 export class GoalRateLimiter implements IGoalRateLimiter {
-  private readonly redis: RedisClientType;
+  private readonly redis: Redis;
   private readonly config: GoalRateLimiterConfig;
 
-  constructor(redis: RedisClientType, config: Partial<GoalRateLimiterConfig> = {}) {
+  constructor(redis: Redis, config: Partial<GoalRateLimiterConfig> = {}) {
     this.redis = redis;
     this.config = { ...DEFAULT_RATE_LIMITER_CONFIG, ...config };
   }
@@ -366,7 +366,7 @@ export class GoalRateLimiter implements IGoalRateLimiter {
  * Create a GoalRateLimiter instance.
  */
 export function createGoalRateLimiter(
-  redis: RedisClientType,
+  redis: Redis,
   config?: Partial<GoalRateLimiterConfig>
 ): GoalRateLimiter {
   return new GoalRateLimiter(redis, config);

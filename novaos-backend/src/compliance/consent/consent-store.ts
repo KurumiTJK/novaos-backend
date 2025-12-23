@@ -11,15 +11,15 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { KeyValueStore } from '../../../storage/index.js';
-import type { EncryptionService } from '../../../security/encryption/service.js';
-import { ok, err, type AsyncAppResult } from '../../../types/result.js';
-import type { UserId, Timestamp } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import type { KeyValueStore } from '../../storage/index.js';
+import type { EncryptionService } from '../../security/encryption/service.js';
+import { ok, err, type AsyncAppResult } from '../../types/result.js';
+import type { UserId, Timestamp } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import { ConsentKeys } from '../keys.js';
-import { SecureStore, storeError } from '../../../services/spark-engine/store/secure-store.js';
-import type { SecureStoreConfig } from '../../../services/spark-engine/store/types.js';
-import { StoreErrorCode as ErrorCodes } from '../../../services/spark-engine/store/types.js';
+import { SecureStore, storeError } from '../../services/spark-engine/store/secure-store.js';
+import type { SecureStoreConfig } from '../../services/spark-engine/store/types.js';
+import { StoreErrorCode as ErrorCodes } from '../../services/spark-engine/store/types.js';
 import type {
   UserConsent,
   ConsentRecord,

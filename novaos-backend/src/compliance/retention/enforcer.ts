@@ -11,10 +11,10 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { KeyValueStore } from '../../../storage/index.js';
-import { ok, err, type AsyncAppResult } from '../../../types/result.js';
-import type { Timestamp } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import type { KeyValueStore } from '../../storage/index.js';
+import { ok, err, type AsyncAppResult } from '../../types/result.js';
+import type { Timestamp } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import { RetentionKeys } from '../keys.js';
 import type {
   RetentionPolicy,

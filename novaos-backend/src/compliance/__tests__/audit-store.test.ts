@@ -6,9 +6,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AuditStore, createAuditStore } from '../audit-log/audit-store.js';
 import { AuditLogger, createAuditLogger } from '../audit-log/audit-logger.js';
-import type { KeyValueStore } from '../../../storage/index.js';
-import type { UserId, Timestamp, AuditId } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import type { KeyValueStore } from '../../storage/index.js';
+import type { UserId, Timestamp, AuditId } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import type { AuditEntry, AuditCategory, AuditAction } from '../audit-log/types.js';
 import { verifyAuditEntryHash } from '../audit-log/types.js';
 

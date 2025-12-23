@@ -34,6 +34,12 @@ export interface KeyValueStore {
   smembers(key: string): Promise<string[]>;
   sismember(key: string, member: string): Promise<boolean>;
   scard(key: string): Promise<number>;
+
+  // Sorted set operations
+  zadd(key: string, score: number, member: string): Promise<number>;
+  zrange(key: string, start: number, stop: number): Promise<string[]>;
+  zrevrange(key: string, start: number, stop: number): Promise<string[]>;
+  zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
   
   // Connection
   isConnected(): boolean;
@@ -177,6 +183,23 @@ export class RedisStore implements KeyValueStore {
     return this.client.scard(key);
   }
 
+  // Sorted set operations
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    return this.client.zadd(key, score, member);
+  }
+
+  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.client.zrange(key, start, stop);
+  }
+
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.client.zrevrange(key, start, stop);
+  }
+
+  async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
+    return this.client.zremrangebyrank(key, start, stop);
+  }
+
   async disconnect(): Promise<void> {
     await this.client.quit();
   }
@@ -191,11 +214,17 @@ interface MemoryEntry {
   expiresAt?: number;
 }
 
+interface SortedSetEntry {
+  member: string;
+  score: number;
+}
+
 export class MemoryStore implements KeyValueStore {
   private store = new Map<string, MemoryEntry>();
   private hashes = new Map<string, Map<string, string>>();
   private lists = new Map<string, string[]>();
   private sets = new Map<string, Set<string>>();
+  private sortedSets = new Map<string, SortedSetEntry[]>();
 
   isConnected(): boolean {
     return true;
@@ -232,11 +261,12 @@ export class MemoryStore implements KeyValueStore {
   }
 
   async delete(key: string): Promise<boolean> {
-    const existed = this.store.has(key) || this.lists.has(key) || this.sets.has(key) || this.hashes.has(key);
+    const existed = this.store.has(key) || this.lists.has(key) || this.sets.has(key) || this.hashes.has(key) || this.sortedSets.has(key);
     this.store.delete(key);
     this.lists.delete(key);
     this.sets.delete(key);
     this.hashes.delete(key);
+    this.sortedSets.delete(key);
     return existed;
   }
 
@@ -359,11 +389,65 @@ export class MemoryStore implements KeyValueStore {
     return set?.size ?? 0;
   }
 
+  // Sorted set operations
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    let zset = this.sortedSets.get(key);
+    if (!zset) {
+      zset = [];
+      this.sortedSets.set(key, zset);
+    }
+    
+    // Check if member exists
+    const existingIndex = zset.findIndex(e => e.member === member);
+    if (existingIndex >= 0) {
+      // Update score
+      zset[existingIndex]!.score = score;
+      // Re-sort
+      zset.sort((a, b) => a.score - b.score);
+      return 0; // No new elements added
+    }
+    
+    // Add new entry and sort
+    zset.push({ member, score });
+    zset.sort((a, b) => a.score - b.score);
+    return 1;
+  }
+
+  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+    const zset = this.sortedSets.get(key) ?? [];
+    const end = stop < 0 ? zset.length + stop + 1 : stop + 1;
+    return zset.slice(start, end).map(e => e.member);
+  }
+
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    const zset = this.sortedSets.get(key) ?? [];
+    // Reverse the sorted set (highest scores first)
+    const reversed = [...zset].reverse();
+    const end = stop < 0 ? reversed.length + stop + 1 : stop + 1;
+    return reversed.slice(start, end).map(e => e.member);
+  }
+
+  async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
+    const zset = this.sortedSets.get(key);
+    if (!zset) return 0;
+    
+    const len = zset.length;
+    const normalizedStart = start < 0 ? Math.max(0, len + start) : start;
+    const normalizedStop = stop < 0 ? len + stop : stop;
+    
+    if (normalizedStart > normalizedStop || normalizedStart >= len) return 0;
+    
+    const deleteCount = Math.min(normalizedStop, len - 1) - normalizedStart + 1;
+    zset.splice(normalizedStart, deleteCount);
+    return deleteCount;
+  }
+
   async disconnect(): Promise<void> {
     this.store.clear();
     this.hashes.clear();
     this.lists.clear();
     this.sets.clear();
+    this.sortedSets.clear();
   }
 }
 
@@ -404,7 +488,7 @@ export class StoreManager {
 
   getStore(): KeyValueStore {
     if (this.useRedis && this.redis?.isConnected()) {
-      return this.redis;
+      return this.redis!;
     }
     return this.memory;
   }

@@ -35,6 +35,7 @@ function isAsciiPrintable(str: string): boolean {
 
 /**
  * Custom Zod refinement for ASCII-only strings.
+ * Returns a ZodEffects, so cannot chain .min() or .max() after this.
  */
 function asciiString(maxLength: number) {
   return z
@@ -47,9 +48,18 @@ function asciiString(maxLength: number) {
 
 /**
  * Custom Zod refinement for non-empty ASCII strings.
+ * 
+ * FIX: Apply .min() BEFORE .refine() since .refine() returns ZodEffects
+ * which doesn't have the .min() method.
  */
 function asciiStringNonEmpty(maxLength: number) {
-  return asciiString(maxLength).min(1, 'Cannot be empty');
+  return z
+    .string()
+    .min(1, 'Cannot be empty')
+    .max(maxLength, `Maximum ${maxLength} characters`)
+    .refine(isAsciiPrintable, {
+      message: 'Must contain only ASCII printable characters',
+    });
 }
 
 /**

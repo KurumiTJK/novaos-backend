@@ -11,10 +11,10 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { KeyValueStore } from '../../../storage/index.js';
-import { ok, err, type AsyncAppResult } from '../../../types/result.js';
-import type { UserId, Timestamp, AuditId } from '../../../types/branded.js';
-import { createTimestamp, createAuditId } from '../../../types/branded.js';
+import type { KeyValueStore } from '../../storage/index.js';
+import { ok, err, type AsyncAppResult } from '../../types/result.js';
+import type { UserId, Timestamp, AuditId } from '../../types/branded.js';
+import { createTimestamp, createAuditId } from '../../types/branded.js';
 import { AuditKeys } from '../keys.js';
 import type {
   AuditEntry,

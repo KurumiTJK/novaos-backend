@@ -14,8 +14,8 @@ import {
 } from '../retention/enforcer.js';
 import type { CategoryRegistry, CandidateFinder, CategoryProcessor } from '../retention/enforcer.js';
 import type { KeyValueStore } from '../../../storage/index.js';
-import type { Timestamp } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import type { Timestamp } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import type { RetentionPolicy, RetentionCategory } from '../retention/types.js';
 import {
   DEFAULT_RETENTION_POLICIES,
@@ -23,7 +23,7 @@ import {
   isPastRetention,
   daysPastRetention,
 } from '../retention/types.js';
-import { ok } from '../../../types/result.js';
+import { ok } from '../../types/result.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MOCK STORE
