@@ -225,15 +225,20 @@ export class HealthChecker {
     const checkedAt = new Date();
     const timeoutMs = (source.healthCheck.timeoutSeconds || this.config.defaultTimeoutSeconds) * 1000;
     
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
     try {
       // Use SSRF-safe client for health checks
       const response = await safeFetch(source.healthCheck.url, {
         method: 'HEAD',
-        timeout: timeoutMs,
+        signal: controller.signal,
         headers: {
           'User-Agent': 'NovaOS-HealthChecker/1.0',
         },
       });
+      clearTimeout(timeoutId);
       const responseTimeMs = Date.now() - startTime;
       
       // Determine status based on HTTP code and response time
@@ -262,6 +267,7 @@ export class HealthChecker {
         checkedAt,
       };
     } catch (error) {
+      clearTimeout(timeoutId);
       const responseTimeMs = Date.now() - startTime;
       
       let errorMessage: string;

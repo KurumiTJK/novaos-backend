@@ -286,7 +286,7 @@ describe('validateResourceIndices', () => {
     const result = validateResourceIndices(days, 5);
     
     expect(result.valid).toBe(false);
-    expect(result.invalidIndices).toContainEqual({ day: undefined, index: 0 });
+    expect(result.invalidIndices).toContainEqual({ day: 1, index: 0 });
   });
 
   it('should detect index above max', () => {

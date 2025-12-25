@@ -226,9 +226,9 @@ export class SparkGenerator implements ISparkGenerator {
    */
   private findResourceById(
     resources: readonly StepResource[] | undefined,
-    resourceId: ResourceId
+    resourceId: ResourceId | undefined
   ): StepResource | undefined {
-    if (!resources || resources.length === 0) {
+    if (!resources || resources.length === 0 || !resourceId) {
       return undefined;
     }
 

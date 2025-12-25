@@ -355,7 +355,7 @@ export class ResourceDiscoveryOrchestrator {
    */
   private async findCandidates(
     request: DiscoveryRequest,
-    stats: Partial<DiscoveryStats>
+    stats: { fromKnownSources: number; [key: string]: unknown }
   ): Promise<RawResourceCandidate[]> {
     const candidates: RawResourceCandidate[] = [];
     
@@ -600,7 +600,7 @@ export class ResourceDiscoveryOrchestrator {
    */
   private async enrichCandidates(
     candidates: Array<RawResourceCandidate & { classification: ClassificationResult }>,
-    stats: Partial<DiscoveryStats>
+    stats: { cacheHits: number; byProvider: Record<string, number>; [key: string]: unknown }
   ): Promise<EnrichedResource[]> {
     if (!this.config.enableEnrichment) {
       // Skip enrichment, create minimal EnrichedResource
@@ -680,7 +680,10 @@ export class ResourceDiscoveryOrchestrator {
       contentType: 'article',
       format: 'text',
       difficulty: 'intermediate',
-      metadata: { provider: candidate.classification.provider },
+      metadata: { 
+        provider: 'unknown' as const,
+        title: candidate.title ?? 'Unknown',
+      },
       topicIds: candidate.topicIds,
       qualitySignals: this.computeQualitySignals(candidate),
     };
@@ -727,7 +730,7 @@ export class ResourceDiscoveryOrchestrator {
    */
   private async verifyCandidates(
     enriched: EnrichedResource[],
-    stats: Partial<DiscoveryStats>
+    stats: { cacheHits: number; [key: string]: unknown }
   ): Promise<{
     verified: VerifiedResource[];
     failed: Array<{ url: string; error: ResourceError }>;
@@ -804,13 +807,17 @@ export class ResourceDiscoveryOrchestrator {
     
     return {
       ...enriched,
+      discoveredAt: enriched.candidateCreatedAt,
       verifiedAt: now,
-      verification: {
+      expiresAt: new Date(now.getTime() + RESOURCE_TTL.VERIFICATION_MS),
+      accessibility: 'accessible',
+      evidence: {
+        verifiedAt: now,
+        level: 'low',
         httpStatus: 200,
         responseTimeMs: 0,
-        redirectChain: [],
-        finalUrl: enriched.canonicalUrl,
-        contentWalls: {
+        usesHttps: true,
+        walls: {
           hasPaywall: false,
           hasLoginWall: false,
           hasBotWall: false,
