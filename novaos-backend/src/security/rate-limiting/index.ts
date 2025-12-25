@@ -66,3 +66,56 @@ export {
   clearRateLimitEventHandlers,
   type RateLimitOptions,
 } from './middleware.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RATE LIMIT CATEGORY CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Rate limit category constants for use with createRateLimiter.
+ * Maps to EndpointCategory values from config.
+ */
+export const RateLimitCategory = {
+  DEFAULT: 'DEFAULT',
+  CHAT: 'CHAT',
+  GOAL_CREATION: 'GOAL_CREATION',
+  SPARK_GENERATION: 'SPARK_GENERATION',
+  MEMORY_EXTRACTION: 'MEMORY_EXTRACTION',
+  WEB_FETCH: 'WEB_FETCH',
+  AUTH: 'AUTH',
+  EXPORT: 'EXPORT',
+  ADMIN: 'ADMIN',
+  BULK: 'BULK',
+} as const;
+
+export type RateLimitCategoryType = typeof RateLimitCategory[keyof typeof RateLimitCategory];
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RATE LIMITER FACTORY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { rateLimit as createRateLimitMiddleware, type RateLimitOptions } from './middleware.js';
+import type { EndpointCategory } from './config.js';
+
+/**
+ * Create a rate limiter middleware for a specific category.
+ * 
+ * @example
+ * const goalLimiter = createRateLimiter(RateLimitCategory.GOAL_CREATION);
+ * router.post('/goals', goalLimiter, createGoalHandler);
+ * 
+ * @example
+ * // With custom options
+ * const chatLimiter = createRateLimiter(RateLimitCategory.CHAT, {
+ *   keyGenerator: (ctx) => `chat:${ctx.userId}`,
+ * });
+ */
+export function createRateLimiter(
+  category: RateLimitCategoryType | EndpointCategory,
+  options?: Omit<RateLimitOptions, 'category'>
+) {
+  return createRateLimitMiddleware({
+    ...options,
+    category: category as EndpointCategory,
+  });
+}
