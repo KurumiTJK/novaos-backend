@@ -13,7 +13,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Router, type Response } from 'express';
+import { Router, type Response, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { auth, type AuthenticatedRequest } from '../../auth/index.js';
 import { getSwordStore } from '../../core/sword/index.js';
@@ -192,7 +192,8 @@ export function createQuestRouter(): Router {
       const quest = await store.createQuest(userId, {
         goalId: input.goalId,
         title: input.title,
-        description: input.description,
+        description: input.description ?? '',
+        outcome: input.outcome ?? '',
         order: input.order,
         estimatedMinutes: input.estimatedMinutes,
       });
@@ -413,6 +414,13 @@ export function createQuestRouter(): Router {
       
       const store = getSwordStore();
       const result = await store.transitionQuestState(questId, type);
+      
+      if (!result) {
+        throw new ValidationError(
+          `Failed to transition quest state`,
+          { questId, event: type }
+        );
+      }
       
       if (!result.success) {
         throw new ValidationError(

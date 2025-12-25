@@ -15,7 +15,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Router, type Response } from 'express';
+import { Router, type Response, type RequestHandler } from 'express';
 import { auth, type AuthenticatedRequest } from '../../auth/index.js';
 import { createRateLimiter, RateLimitCategory } from '../../security/rate-limiting/index.js';
 import { getSwordStore, getSparkGenerator } from '../../core/sword/index.js';
@@ -106,7 +106,7 @@ export function createSparkRouter(): Router {
   router.post(
     '/generate',
     auth.middleware(true),
-    sparkGenerationLimiter,
+    sparkGenerationLimiter as RequestHandler,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.userId!;
       
@@ -344,6 +344,10 @@ export function createSparkRouter(): Router {
       const store = getSwordStore();
       const result = await store.transitionSparkState(sparkId, 'accept');
       
+      if (!result) {
+        throw new ValidationError(`Failed to transition spark state`, { sparkId, event: 'accept' });
+      }
+      
       if (!result.success) {
         throw new ValidationError(
           result.error || `Cannot accept spark in ${spark.status} state`,
@@ -409,6 +413,10 @@ export function createSparkRouter(): Router {
       
       const store = getSwordStore();
       const result = await store.transitionSparkState(sparkId, 'complete');
+      
+      if (!result) {
+        throw new ValidationError(`Failed to transition spark state`, { sparkId, event: 'complete' });
+      }
       
       if (!result.success) {
         throw new ValidationError(
@@ -479,6 +487,10 @@ export function createSparkRouter(): Router {
       
       const store = getSwordStore();
       const result = await store.transitionSparkState(sparkId, 'skip');
+      
+      if (!result) {
+        throw new ValidationError(`Failed to transition spark state`, { sparkId, event: 'skip' });
+      }
       
       if (!result.success) {
         throw new ValidationError(
@@ -560,6 +572,10 @@ export function createSparkRouter(): Router {
       
       const store = getSwordStore();
       const result = await store.transitionSparkState(sparkId, type);
+      
+      if (!result) {
+        throw new ValidationError(`Failed to transition spark state`, { sparkId, event: type });
+      }
       
       if (!result.success) {
         throw new ValidationError(

@@ -13,7 +13,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Router, type Response } from 'express';
+import { Router, type Response, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { auth, type AuthenticatedRequest } from '../../auth/index.js';
 import { getSwordStore } from '../../core/sword/index.js';
@@ -211,6 +211,10 @@ export function createStepRouter(): Router {
         actionType: input.actionType,
       });
       
+      if (!step) {
+        throw new ValidationError('Failed to create step. Quest may not exist.');
+      }
+      
       logger.info('Step created', {
         userId,
         stepId: step.id,
@@ -342,6 +346,10 @@ export function createStepRouter(): Router {
       const store = getSwordStore();
       const result = await store.transitionStepState(stepId, type);
       
+      if (!result) {
+        throw new ValidationError(`Failed to transition step state`, { stepId, event: type });
+      }
+      
       if (!result.success) {
         throw new ValidationError(
           result.error || `Cannot transition from ${step.status} with event ${type}`,
@@ -405,6 +413,10 @@ export function createStepRouter(): Router {
       
       // Perform transition
       const result = await store.transitionStepState(stepId, 'complete');
+      
+      if (!result) {
+        throw new ValidationError(`Failed to transition step state`, { stepId, event: 'complete' });
+      }
       
       if (!result.success) {
         throw new ValidationError(
@@ -475,6 +487,10 @@ export function createStepRouter(): Router {
       
       // Perform transition
       const result = await store.transitionStepState(stepId, 'skip');
+      
+      if (!result) {
+        throw new ValidationError(`Failed to transition step state`, { stepId, event: 'skip' });
+      }
       
       if (!result.success) {
         throw new ValidationError(

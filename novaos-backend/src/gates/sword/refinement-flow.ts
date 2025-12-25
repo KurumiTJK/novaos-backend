@@ -83,7 +83,7 @@ const QUESTION_TEMPLATES: Record<RefinementField, readonly string[]> = {
  */
 function getQuestionForField(field: RefinementField, topic?: string): string {
   const templates = QUESTION_TEMPLATES[field];
-  const template = templates[Math.floor(Math.random() * templates.length)];
+  const template = templates[Math.floor(Math.random() * templates.length)]!;
   return template.replace('{topic}', topic ?? 'this topic');
 }
 
@@ -140,7 +140,7 @@ function parseDailyTimeCommitment(response: string): number | null {
   // Direct minute/hour patterns
   const minuteMatch = lower.match(/(\d+)\s*(min|minute|m\b)/i);
   if (minuteMatch) {
-    const minutes = parseInt(minuteMatch[1], 10);
+    const minutes = parseInt(minuteMatch[1]!, 10);
     if (minutes >= 1 && minutes <= 480) {
       return minutes;
     }
@@ -148,7 +148,7 @@ function parseDailyTimeCommitment(response: string): number | null {
 
   const hourMatch = lower.match(/(\d+(?:\.\d+)?)\s*(hour|hr|h\b)/i);
   if (hourMatch) {
-    const hours = parseFloat(hourMatch[1]);
+    const hours = parseFloat(hourMatch[1]!);
     const minutes = Math.round(hours * 60);
     if (minutes >= 1 && minutes <= 480) {
       return minutes;
@@ -166,7 +166,7 @@ function parseDailyTimeCommitment(response: string): number | null {
   // Bare number (assume minutes if <= 120, hours if <= 8)
   const bareNumber = lower.match(/^(\d+)$/);
   if (bareNumber) {
-    const num = parseInt(bareNumber[1], 10);
+    const num = parseInt(bareNumber[1]!, 10);
     if (num <= 120) return num; // Assume minutes
     if (num <= 8) return num * 60; // Assume hours
   }
@@ -184,7 +184,7 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   // Week patterns
   const weekMatch = lower.match(/(\d+)\s*(week|wk)/i);
   if (weekMatch) {
-    const weeks = parseInt(weekMatch[1], 10);
+    const weeks = parseInt(weekMatch[1]!, 10);
     if (weeks >= 1 && weeks <= 52) {
       return { duration: `${weeks} week${weeks > 1 ? 's' : ''}`, days: weeks * 7 };
     }
@@ -193,7 +193,7 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   // Month patterns
   const monthMatch = lower.match(/(\d+)\s*(month|mo\b)/i);
   if (monthMatch) {
-    const months = parseInt(monthMatch[1], 10);
+    const months = parseInt(monthMatch[1]!, 10);
     if (months >= 1 && months <= 12) {
       return { duration: `${months} month${months > 1 ? 's' : ''}`, days: months * 30 };
     }
@@ -202,7 +202,7 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   // Day patterns
   const dayMatch = lower.match(/(\d+)\s*(day|d\b)/i);
   if (dayMatch) {
-    const days = parseInt(dayMatch[1], 10);
+    const days = parseInt(dayMatch[1]!, 10);
     if (days >= 3 && days <= 365) {
       return { duration: `${days} days`, days };
     }
@@ -269,7 +269,7 @@ function parseStartDate(response: string): string | null {
   // "next monday", "next week"
   const nextWeekMatch = lower.match(/next\s+(week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i);
   if (nextWeekMatch) {
-    const target = nextWeekMatch[1].toLowerCase();
+    const target = nextWeekMatch[1]!.toLowerCase();
     if (target === 'week') {
       const nextWeek = new Date(today);
       nextWeek.setDate(nextWeek.getDate() + 7);
@@ -294,14 +294,14 @@ function parseStartDate(response: string): string | null {
   // ISO date format (YYYY-MM-DD)
   const isoMatch = lower.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
-    return isoMatch[0];
+    return isoMatch[0]!;
   }
 
   // Common date formats
   const dateMatch = lower.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
   if (dateMatch) {
-    const month = parseInt(dateMatch[1], 10);
-    const day = parseInt(dateMatch[2], 10);
+    const month = parseInt(dateMatch[1]!, 10);
+    const day = parseInt(dateMatch[2]!, 10);
     let year = dateMatch[3] ? parseInt(dateMatch[3], 10) : today.getFullYear();
     if (year < 100) year += 2000;
     
@@ -433,7 +433,13 @@ export class RefinementFlow {
     const extractedTopic = this.extractTopic(goalStatement);
 
     // ✅ FIX: Pre-fill inputs from user preferences
-    const inputs: SwordRefinementInputs = {
+    // Use mutable object then cast to readonly
+    const mutableInputs: {
+      goalStatement: string;
+      extractedTopic?: string;
+      learningStyle?: string;
+      dailyTimeCommitment?: number;
+    } = {
       goalStatement,
       extractedTopic,
     };
@@ -441,12 +447,14 @@ export class RefinementFlow {
     // Apply user preferences if provided
     if (userPreferences) {
       if (userPreferences.defaultLearningStyle) {
-        inputs.learningStyle = userPreferences.defaultLearningStyle;
+        mutableInputs.learningStyle = userPreferences.defaultLearningStyle;
       }
       if (userPreferences.defaultDailyMinutes) {
-        inputs.dailyTimeCommitment = userPreferences.defaultDailyMinutes;
+        mutableInputs.dailyTimeCommitment = userPreferences.defaultDailyMinutes;
       }
     }
+
+    const inputs = mutableInputs as SwordRefinementInputs;
 
     return {
       userId,
@@ -677,7 +685,7 @@ export class RefinementFlow {
 
     for (const pattern of patterns) {
       const match = goalStatement.match(pattern);
-      if (match) {
+      if (match && match[1]) {
         // Clean up the extracted topic
         let topic = match[1].trim();
         // Remove trailing punctuation

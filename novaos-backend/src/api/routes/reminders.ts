@@ -64,8 +64,13 @@ const DEFAULT_REMINDER_CONFIG = {
     start: '22:00',
     end: '08:00',
   },
-  pausedUntil: null,
+  pausedUntil: null as string | null,
 };
+
+/**
+ * Type for reminder configuration.
+ */
+type ReminderConfig = typeof DEFAULT_REMINDER_CONFIG;
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // HELPER FUNCTIONS
@@ -87,12 +92,12 @@ async function getReminderService() {
 /**
  * Get user's reminder config from store or return default.
  */
-async function getUserReminderConfig(userId: string) {
+async function getUserReminderConfig(userId: string): Promise<ReminderConfig> {
   const service = await getReminderService();
   
   if (service) {
     const config = await service.getUserConfig(userId);
-    if (config) return config;
+    if (config) return config as ReminderConfig;
   }
   
   // Return default config if service unavailable or no config exists
@@ -176,8 +181,8 @@ export function createReminderRouter(): Router {
       // Get current config
       const currentConfig = await getUserReminderConfig(userId);
       
-      // Merge updates
-      const newConfig = {
+      // Merge updates (currentConfig provides all required fields)
+      const newConfig: ReminderConfig = {
         ...currentConfig,
         ...updates,
         schedule: updates.schedule

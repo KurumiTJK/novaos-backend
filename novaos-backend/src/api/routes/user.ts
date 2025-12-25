@@ -129,7 +129,7 @@ async function collectUserData(userId: string): Promise<UserDataExport['data']> 
   let reminderConfig: unknown = null;
   try {
     const { getReminderService } = await import('../../core/sword/index.js');
-    const service = getReminderService();
+    const service = await getReminderService();
     if (service) {
       reminderConfig = await service.getUserConfig(userId);
     }
@@ -289,7 +289,7 @@ async function deleteAllUserData(userId: string): Promise<{
   // Delete reminder config if available
   try {
     const { getReminderService } = await import('../../core/sword/index.js');
-    const service = getReminderService();
+    const service = await getReminderService();
     if (service) {
       await service.deleteUserConfig(userId);
     }
@@ -394,7 +394,7 @@ export function createUserRouter(): Router {
         
         profile: {
           email: user?.email,
-          createdAt: user?.createdAt,
+          createdAt: user?.createdAt ? new Date(user.createdAt).toISOString() : undefined,
           tier: user?.tier,
         },
         

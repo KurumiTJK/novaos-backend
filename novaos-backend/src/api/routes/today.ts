@@ -9,7 +9,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Router, type Response } from 'express';
+import { Router, type Response, type RequestHandler } from 'express';
 import { auth, type AuthenticatedRequest } from '../../auth/index.js';
 import { createRateLimiter, RateLimitCategory } from '../../security/rate-limiting/index.js';
 import { getSwordStore, getSparkGenerator } from '../../core/sword/index.js';
@@ -250,7 +250,7 @@ export function createTodayRouter(): Router {
   router.post(
     '/refresh',
     auth.middleware(true),
-    sparkGenerationLimiter,
+    sparkGenerationLimiter as RequestHandler,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.userId!;
       

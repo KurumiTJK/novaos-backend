@@ -385,7 +385,7 @@ export function createProgressRouter(): Router {
       // Get progress for active goals
       const activeGoals = allGoals.filter((g) => g.status === 'active');
       const goalProgress = await Promise.all(
-        activeGoals.slice(0, 5).map((g) => calculateGoalProgress(g.id, userId))
+        activeGoals.slice(0, 5).map((g) => calculateGoalProgress(g.id as GoalId, userId))
       );
       
       const response: OverallProgress = {

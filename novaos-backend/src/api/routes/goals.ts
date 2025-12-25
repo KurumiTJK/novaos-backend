@@ -13,7 +13,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Router, type Response } from 'express';
+import { Router, type Response, type RequestHandler } from 'express';
 import { auth, type AuthenticatedRequest } from '../../auth/index.js';
 import { createRateLimiter, RateLimitCategory } from '../../security/rate-limiting/index.js';
 import { getSwordStore } from '../../core/sword/index.js';
@@ -106,7 +106,7 @@ export function createGoalRouter(): Router {
   router.post(
     '/',
     auth.middleware(true),
-    goalCreationLimiter,
+    goalCreationLimiter as RequestHandler,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.userId!;
       
@@ -302,7 +302,22 @@ export function createGoalRouter(): Router {
       });
       
       const store = getSwordStore();
-      const updatedGoal = await store.updateGoal(goalId, updates);
+      
+      // Convert null to undefined for optional fields
+      const cleanedUpdates = {
+        ...updates,
+        tags: updates.tags ?? undefined,
+        constraints: updates.constraints ?? undefined,
+        motivations: updates.motivations ?? undefined,
+        targetDate: updates.targetDate ?? undefined,
+        successCriteria: updates.successCriteria ?? undefined,
+      };
+      
+      const updatedGoal = await store.updateGoal(goalId, cleanedUpdates);
+      
+      if (!updatedGoal) {
+        throw new NotFoundError(`Goal not found: ${goalId}`);
+      }
       
       res.json({
         goal: updatedGoal,
@@ -387,6 +402,13 @@ export function createGoalRouter(): Router {
       
       const store = getSwordStore();
       const result = await store.transitionGoalState(goalId, type);
+      
+      if (!result) {
+        throw new ValidationError(
+          `Failed to transition goal state`,
+          { goalId, event: type }
+        );
+      }
       
       if (!result.success) {
         throw new ValidationError(
