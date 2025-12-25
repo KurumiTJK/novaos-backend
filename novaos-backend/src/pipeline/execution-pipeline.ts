@@ -17,7 +17,7 @@ import {
   executeIntentGateAsync,
   executeShieldGate,
   executeLensGate,
-  executeLensGateAsync,  // ← NEW: Import async Lens gate
+  executeLensGateAsync,
   executeStanceGate,
   executeCapabilityGate,
   executeModelGate,
@@ -34,11 +34,93 @@ import {
 } from '../providers/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// SWORDGATE IMPORTS — Phase 13 Integration
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { SwordGate, type SwordGateOutput } from '../gates/sword/index.js';
+import type { IRefinementStore, RefinementState } from '../services/spark-engine/store/types.js';
+import type { UserId, Timestamp } from '../types/branded.js';
+import { createUserId, createTimestamp } from '../types/branded.js';
+import { ok, err, type AsyncAppResult } from '../types/result.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const MAX_REGENERATIONS = 2;
 const PIPELINE_TIMEOUT_MS = 30000;
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// IN-MEMORY REFINEMENT STORE — Lightweight store for SwordGate
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Simple in-memory refinement store for SwordGate.
+ * For production, replace with Redis-backed RefinementStore.
+ */
+class InMemoryRefinementStore implements IRefinementStore {
+  private states = new Map<string, RefinementState>();
+
+  async save(state: RefinementState): AsyncAppResult<RefinementState> {
+    this.states.set(state.userId, state);
+    return ok(state);
+  }
+
+  async get(userId: UserId): AsyncAppResult<RefinementState | null> {
+    const state = this.states.get(userId) ?? null;
+    
+    // Check expiration
+    if (state && new Date(state.expiresAt).getTime() < Date.now()) {
+      this.states.delete(userId);
+      return ok(null);
+    }
+    
+    return ok(state);
+  }
+
+  async delete(userId: UserId): AsyncAppResult<boolean> {
+    const existed = this.states.has(userId);
+    this.states.delete(userId);
+    return ok(existed);
+  }
+
+  async update(
+    userId: UserId,
+    updates: Partial<RefinementState>
+  ): AsyncAppResult<RefinementState> {
+    const existing = this.states.get(userId);
+    if (!existing) {
+      return err({
+        code: 'NOT_FOUND',
+        message: 'No refinement state found for user',
+      });
+    }
+    
+    const updated: RefinementState = {
+      ...existing,
+      ...updates,
+      updatedAt: createTimestamp(),
+    };
+    this.states.set(userId, updated);
+    return ok(updated);
+  }
+
+  async advanceStage(userId: UserId): AsyncAppResult<RefinementState> {
+    const existing = this.states.get(userId);
+    if (!existing) {
+      return err({
+        code: 'NOT_FOUND',
+        message: 'No refinement state found for user',
+      });
+    }
+    
+    const stageOrder: RefinementState['stage'][] = ['initial', 'clarifying', 'confirming', 'complete'];
+    const currentIndex = stageOrder.indexOf(existing.stage);
+    const nextStage = stageOrder[currentIndex + 1] ?? 'complete';
+    
+    return this.update(userId, { stage: nextStage });
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PIPELINE CONFIG
@@ -47,7 +129,8 @@ const PIPELINE_TIMEOUT_MS = 30000;
 export interface PipelineConfig extends ProviderManagerConfig {
   useMockProvider?: boolean;
   systemPrompt?: string;
-  enableLensSearch?: boolean;  // ← NEW: Option to enable/disable Lens search
+  enableLensSearch?: boolean;
+  enableSwordGate?: boolean;  // ← NEW: Option to enable/disable SwordGate
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -58,24 +141,27 @@ export class ExecutionPipeline {
   private providerManager: ProviderManager | null = null;
   private useMock: boolean;
   private systemPrompt: string;
-  private enableLensSearch: boolean;  // ← NEW
+  private enableLensSearch: boolean;
+  private enableSwordGate: boolean;
+  
+  // SwordGate components (lazy initialized)
+  private swordGate: SwordGate | null = null;
+  private refinementStore: IRefinementStore | null = null;
 
   constructor(config: PipelineConfig = {}) {
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
     this.enableLensSearch = config.enableLensSearch ?? true;
+    this.enableSwordGate = config.enableSwordGate ?? true;  // ← Enabled by default
     
-    // Determine mock mode:
-    // - If explicitly set in config, use that
-    // - If API keys provided in config, use real mode
-    // - Otherwise default to mock (safe for tests)
+    // Determine mock mode
     const hasConfigKeys = !!(config.openaiApiKey || config.geminiApiKey);
     
     if (config.useMockProvider !== undefined) {
       this.useMock = config.useMockProvider;
     } else if (hasConfigKeys) {
-      this.useMock = false;  // Config provided keys → use real mode
+      this.useMock = false;
     } else {
-      this.useMock = true;   // No config keys → default to mock (safe for tests)
+      this.useMock = true;
     }
 
     // Initialize provider manager if not using mock
@@ -86,6 +172,59 @@ export class ExecutionPipeline {
         preferredProvider: config.preferredProvider,
         enableFallback: config.enableFallback ?? true,
       });
+    }
+  }
+
+  /**
+   * Lazy initialization of SwordGate.
+   * Creates the gate on first use to avoid initialization overhead.
+   */
+  private getSwordGate(): SwordGate {
+    if (!this.swordGate) {
+      // Create in-memory refinement store
+      this.refinementStore = new InMemoryRefinementStore();
+      
+      // Initialize SwordGate
+      this.swordGate = new SwordGate(
+        this.refinementStore,
+        {
+          useLlmModeDetection: !this.useMock && !!process.env.OPENAI_API_KEY,
+        },
+        {
+          openaiApiKey: process.env.OPENAI_API_KEY,
+          // sparkEngine and rateLimiter can be added later for full functionality
+        }
+      );
+      
+      console.log('[PIPELINE] SwordGate initialized');
+    }
+    return this.swordGate;
+  }
+
+  /**
+   * Check if user has an active refinement session.
+   * This is used to route follow-up messages back to SwordGate
+   * even if they don't match the initial learning intent pattern.
+   */
+  private async checkActiveRefinement(userId: string): Promise<boolean> {
+    // Ensure refinement store is initialized
+    if (!this.refinementStore) {
+      // Initialize lazily if needed
+      this.refinementStore = new InMemoryRefinementStore();
+    }
+    
+    try {
+      const result = await this.refinementStore.get(userId as UserId);
+      const hasActive = result.ok && result.value !== null;
+      
+      if (hasActive) {
+        console.log(`[PIPELINE] Active refinement found for user ${userId}, stage: ${result.value?.stage}`);
+      }
+      
+      return hasActive;
+    } catch (error) {
+      console.error('[PIPELINE] Error checking refinement state:', error);
+      return false;
     }
   }
 
@@ -156,10 +295,8 @@ export class ExecutionPipeline {
 
     // Check for soft veto (await acknowledgment)
     if (state.gateResults.shield.action === 'await_ack') {
-      // Check if ack token provided
       if (context.ackTokenValid) {
         state.flags.ackTokenValid = true;
-        // Continue with pipeline
       } else {
         state.stance = 'shield';
         return {
@@ -178,11 +315,6 @@ export class ExecutionPipeline {
     }
 
     // ─── STAGE 3: LENS (ASYNC - LLM POWERED WITH TIERED VERIFICATION) ───
-    // Use async LLM-powered Lens gate only when:
-    // 1. Not in mock mode
-    // 2. Provider manager is available (has API keys)
-    // 3. OpenAI key is available (for LLM classification)
-    // 4. Lens search is enabled
     const shouldUseAsyncLens = !this.useMock && 
                                this.providerManager !== null &&
                                !!process.env.OPENAI_API_KEY && 
@@ -192,7 +324,7 @@ export class ExecutionPipeline {
       try {
         state.gateResults.lens = await executeLensGateAsync(state, context, {
           enableSearch: this.enableLensSearch,
-          userTimezone: context.timezone,  // Pass user's timezone from request context
+          userTimezone: context.timezone,
         });
         state.lensResult = state.gateResults.lens.output;
       } catch (lensError) {
@@ -201,7 +333,6 @@ export class ExecutionPipeline {
         state.lensResult = state.gateResults.lens.output;
       }
     } else {
-      // Use sync Lens gate (pattern-based detection)
       state.gateResults.lens = executeLensGate(state, context);
       state.lensResult = state.gateResults.lens.output;
     }
@@ -214,15 +345,126 @@ export class ExecutionPipeline {
     state.gateResults.capability = executeCapabilityGate(state, context);
     state.capabilities = state.gateResults.capability.output;
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STAGE 5.5: SWORDGATE — Goal Creation Flow (Phase 13)
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    // Route to SwordGate if:
+    //   1. User has an ACTIVE refinement session (multi-turn flow), OR
+    //   2. This is a NEW learning intent (stance=sword + domain=education)
+    //
+    // This ensures follow-up messages like "i am new" or "beginner" are
+    // routed back to SwordGate even if they don't match the education intent.
+    //
+    // SwordGate handles: capture → refine → suggest → create
+    // If suppressModelGeneration is true, return SwordGate's response directly.
+    //
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // Check 1: Does user have an ACTIVE refinement session?
+    const hasActiveRefinement = context.userId 
+      ? await this.checkActiveRefinement(context.userId)
+      : false;
+    
+    // Check 2: Is this a NEW learning intent?
+    const isLearningIntent = 
+      state.intent?.primaryDomain === 'education' &&
+      (state.intent?.type === 'action' || state.intent?.type === 'planning');
+    
+    // Route to SwordGate if EITHER condition is true
+    const shouldUseSwordGate = 
+      this.enableSwordGate &&
+      context.userId &&
+      (hasActiveRefinement || (state.stance === 'sword' && isLearningIntent));
+    
+    if (shouldUseSwordGate) {
+      try {
+        const routeReason = hasActiveRefinement 
+          ? 'active refinement session' 
+          : 'education + action intent';
+        console.log(`[PIPELINE] Routing to SwordGate (${routeReason})`);
+        
+        // Build a compatible state object for SwordGate
+        // SwordGate expects a different PipelineState type with state.input
+        const swordCompatibleState = {
+          ...state,
+          input: {
+            userId: context.userId,
+            message: state.userMessage,
+            sessionId: context.sessionId,
+          },
+          // SwordGate's PipelineState also expects these fields
+          regenerationCount: 0,
+          degraded: false,
+        };
+        
+        const swordGate = this.getSwordGate();
+        // Cast to any to bridge the two different PipelineState types
+        const swordResult = await swordGate.execute(swordCompatibleState as any, context as any);
+        
+        const swordOutput = swordResult.output as SwordGateOutput;
+        
+        // If SwordGate wants to handle the response directly, return early
+        if (swordOutput.suppressModelGeneration && swordOutput.responseMessage) {
+          console.log(`[PIPELINE] SwordGate mode: ${swordOutput.mode}, suppressing LLM`);
+          
+          // Convert SwordGateOutput to SparkResult for type compatibility
+          state.gateResults.spark = {
+            gateId: 'spark',
+            status: swordResult.status,
+            output: {
+              eligible: true,
+              spark: swordOutput.createdGoal ? {
+                action: swordOutput.responseMessage,
+                rationale: `Goal creation via SwordGate: ${swordOutput.mode}`,
+                category: 'immediate' as const,
+              } : undefined,
+            },
+            action: swordResult.action,
+            executionTimeMs: swordResult.executionTimeMs,
+          };
+          
+          return {
+            status: 'success',
+            response: swordOutput.responseMessage,
+            stance: 'sword',
+            gateResults: state.gateResults,
+            metadata: {
+              requestId: context.requestId,
+              totalTimeMs: Date.now() - pipelineStart,
+              // Note: swordMode and refinementProgress stored in gateResults.spark
+            },
+          };
+        }
+        
+        // Store a compatible spark result for passthrough case
+        state.gateResults.spark = {
+          gateId: 'spark',
+          status: 'pass',
+          output: {
+            eligible: false,
+            ineligibilityReason: 'sword_gate_passthrough',
+          },
+          action: 'continue',
+          executionTimeMs: swordResult.executionTimeMs,
+        };
+        
+        // Continue with normal LLM generation
+        console.log(`[PIPELINE] SwordGate mode: ${swordOutput.mode}, continuing to LLM`);
+        
+      } catch (swordError) {
+        console.error('[PIPELINE] SwordGate error, falling back to normal flow:', swordError);
+        // Continue with normal spark gate on error
+      }
+    }
+
     // ─── STAGE 6-7: GENERATION LOOP ───
     let regenerationCount = 0;
 
     // ─── INJECT LENS EVIDENCE INTO PROMPT ───
-    // If we have verified evidence from live data providers, inject it into the prompt
     let augmentedMessage = state.userMessage;
     const lensResult = state.lensResult as any;
     
-    // Check multiple possible evidence structures from Lens gate
     let evidenceContext = '';
     let errorContext = '';
     
@@ -231,13 +473,11 @@ export class ExecutionPipeline {
       const successfulFetches = lensResult.fetchResults.filter((f: any) => f.result?.ok);
       const failedFetches = lensResult.fetchResults.filter((f: any) => f.result && !f.result.ok);
       
-      // Handle successful fetches - inject live data
       if (successfulFetches.length > 0) {
         const evidenceLines = successfulFetches.map((fetch: any) => {
           const data = fetch.result.data;
           if (!data) return null;
           
-          // Format based on data type
           if (data.type === 'stock') {
             const price = data.price ?? 0;
             const change = data.change ?? 0;
@@ -289,11 +529,9 @@ export class ExecutionPipeline {
             const localTime = data.localTime ?? data.time ?? data.formatted ?? 'Unknown';
             const abbr = data.abbreviation ?? '';
             
-            // Format time more naturally (e.g., "5:10 AM" instead of "05:10:28")
             let formattedTime = localTime;
             let datePart = '';
             try {
-              // Try to extract just the time portion and format nicely
               const parts = localTime.split(' ');
               datePart = parts[0] || '';
               const timePart = parts[1] || localTime;
@@ -305,7 +543,6 @@ export class ExecutionPipeline {
               // Keep original if parsing fails
             }
             
-            // Determine if this is the user's local timezone
             const isLocalTime = timezone === 'America/Los_Angeles' || abbr === 'PST' || abbr === 'PDT';
             const locationName = timezone.split('/')[1]?.replace('_', ' ') || timezone;
             
@@ -325,7 +562,6 @@ export class ExecutionPipeline {
             }
           }
           
-          // Generic fallback
           return `LIVE DATA:\n${JSON.stringify(data, null, 2)}`;
         }).filter(Boolean);
         
@@ -334,7 +570,6 @@ export class ExecutionPipeline {
         }
       }
       
-      // Handle failed fetches - check for helpful error messages (like typo suggestions)
       if (failedFetches.length > 0) {
         const errorMessages = failedFetches
           .filter((f: any) => f.result?.error?.message)
@@ -427,10 +662,12 @@ Relay the error message above to help the user. If there's a suggestion (like "D
       break;
     }
 
-    // ─── STAGE 8: SPARK ───
-    state.gateResults.spark = executeSparkGate(state, context);
-    if (state.gateResults.spark.output.spark) {
-      state.spark = state.gateResults.spark.output.spark;
+    // ─── STAGE 8: SPARK (only if not already handled by SwordGate) ───
+    if (!state.gateResults.spark) {
+      state.gateResults.spark = executeSparkGate(state, context);
+      if (state.gateResults.spark.output.spark) {
+        state.spark = state.gateResults.spark.output.spark;
+      }
     }
 
     // ─── BUILD FINAL RESPONSE ───
