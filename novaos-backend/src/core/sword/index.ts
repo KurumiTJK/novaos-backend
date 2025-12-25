@@ -60,6 +60,7 @@ export {
 export {
   SwordStore,
   getSwordStore,
+  resetSwordStore,
 } from './store.js';
 
 // Spark Generator

@@ -65,6 +65,10 @@ function userSparksKey(userId: string): string {
   return `sword:user:${userId}:sparks`;
 }
 
+function stepSparksKey(stepId: string): string {
+  return `sword:step:${stepId}:sparks`;
+}
+
 function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -137,6 +141,30 @@ export class SwordStore {
     
     await this.store.set(goalKey(id), JSON.stringify(updated), GOAL_TTL);
     return updated;
+  }
+  
+  async deleteGoal(id: string): Promise<boolean> {
+    const goal = await this.getGoal(id);
+    if (!goal) return false;
+    
+    // Delete all quests for this goal (cascade)
+    const questIds = await this.getGoalQuestIds(id);
+    for (const questId of questIds) {
+      await this.deleteQuest(questId);
+    }
+    
+    // Remove from user's goals list
+    const userGoals = await this.getUserGoalIds(goal.userId);
+    const filteredGoals = userGoals.filter(gid => gid !== id);
+    await this.store.set(userGoalsKey(goal.userId), JSON.stringify(filteredGoals), GOAL_TTL);
+    
+    // Delete goal quests index
+    await this.store.delete(goalQuestsKey(id));
+    
+    // Delete goal itself
+    await this.store.delete(goalKey(id));
+    
+    return true;
   }
   
   async transitionGoalState(id: string, event: GoalEvent): Promise<TransitionResult<Goal> | null> {
@@ -242,6 +270,33 @@ export class SwordStore {
     return updated;
   }
   
+  async deleteQuest(id: string): Promise<boolean> {
+    const quest = await this.getQuest(id);
+    if (!quest) return false;
+    
+    // Delete all steps for this quest (cascade)
+    const stepIds = await this.getQuestStepIds(id);
+    for (const stepId of stepIds) {
+      await this.deleteStep(stepId);
+    }
+    
+    // Remove from goal's quests list
+    const goalQuests = await this.getGoalQuestIds(quest.goalId);
+    const filteredQuests = goalQuests.filter(qid => qid !== id);
+    await this.store.set(goalQuestsKey(quest.goalId), JSON.stringify(filteredQuests), QUEST_TTL);
+    
+    // Update goal's questIds
+    await this.updateGoal(quest.goalId, { questIds: filteredQuests });
+    
+    // Delete quest steps index
+    await this.store.delete(questStepsKey(id));
+    
+    // Delete quest itself
+    await this.store.delete(questKey(id));
+    
+    return true;
+  }
+  
   async transitionQuestState(id: string, event: QuestEvent): Promise<TransitionResult<Quest> | null> {
     const quest = await this.getQuest(id);
     if (!quest) return null;
@@ -266,6 +321,22 @@ export class SwordStore {
     }
     
     return quests.sort((a, b) => a.order - b.order);
+  }
+  
+  async getUserQuests(userId: string, status?: QuestStatus): Promise<Quest[]> {
+    const goals = await this.getUserGoals(userId);
+    const quests: Quest[] = [];
+    
+    for (const goal of goals) {
+      const goalQuests = await this.getQuestsForGoal(goal.id);
+      for (const quest of goalQuests) {
+        if (!status || quest.status === status) {
+          quests.push(quest);
+        }
+      }
+    }
+    
+    return quests;
   }
   
   private async getGoalQuestIds(goalId: string): Promise<string[]> {
@@ -336,6 +407,27 @@ export class SwordStore {
     return updated;
   }
   
+  async deleteStep(id: string): Promise<boolean> {
+    const step = await this.getStep(id);
+    if (!step) return false;
+    
+    // Remove from quest's steps list
+    const questSteps = await this.getQuestStepIds(step.questId);
+    const filteredSteps = questSteps.filter(sid => sid !== id);
+    await this.store.set(questStepsKey(step.questId), JSON.stringify(filteredSteps), STEP_TTL);
+    
+    // Update quest's stepIds
+    await this.updateQuest(step.questId, { stepIds: filteredSteps });
+    
+    // Delete step's sparks index (sparks themselves remain for history)
+    await this.store.delete(stepSparksKey(id));
+    
+    // Delete step itself
+    await this.store.delete(stepKey(id));
+    
+    return true;
+  }
+  
   async transitionStepState(id: string, event: StepEvent): Promise<TransitionResult<Step> | null> {
     const step = await this.getStep(id);
     if (!step) return null;
@@ -401,6 +493,10 @@ export class SwordStore {
     // Link to step if applicable
     if (spark.stepId) {
       await this.updateStep(spark.stepId, { lastSparkId: id });
+      // Also add to step's sparks list
+      const stepSparks = await this.getStepSparkIds(spark.stepId);
+      stepSparks.push(id);
+      await this.store.set(stepSparksKey(spark.stepId), JSON.stringify(stepSparks), SPARK_TTL);
     }
     
     return fullSpark;
@@ -419,6 +515,43 @@ export class SwordStore {
     }
     
     return spark;
+  }
+  
+  async updateSpark(id: string, updates: Partial<Spark>): Promise<Spark | null> {
+    const spark = await this.getSpark(id);
+    if (!spark) return null;
+    
+    const updated: Spark = {
+      ...spark,
+      ...updates,
+      id: spark.id,  // Prevent ID change
+      userId: spark.userId,  // Prevent user change
+    };
+    
+    await this.store.set(sparkKey(id), JSON.stringify(updated), SPARK_TTL);
+    return updated;
+  }
+  
+  async deleteSpark(id: string): Promise<boolean> {
+    const spark = await this.getSpark(id);
+    if (!spark) return false;
+    
+    // Remove from user's sparks list
+    const userSparks = await this.getUserSparkIds(spark.userId);
+    const filteredUserSparks = userSparks.filter(sid => sid !== id);
+    await this.store.set(userSparksKey(spark.userId), JSON.stringify(filteredUserSparks), SPARK_TTL);
+    
+    // Remove from step's sparks list if applicable
+    if (spark.stepId) {
+      const stepSparks = await this.getStepSparkIds(spark.stepId);
+      const filteredStepSparks = stepSparks.filter(sid => sid !== id);
+      await this.store.set(stepSparksKey(spark.stepId), JSON.stringify(filteredStepSparks), SPARK_TTL);
+    }
+    
+    // Delete spark itself
+    await this.store.delete(sparkKey(id));
+    
+    return true;
   }
   
   async transitionSparkState(id: string, event: SparkEvent): Promise<TransitionResult<Spark> | null> {
@@ -461,6 +594,31 @@ export class SwordStore {
     }
     
     return sparks;
+  }
+  
+  async getSparksByStatus(userId: string, status: SparkStatus): Promise<Spark[]> {
+    const allSparks = await this.getUserSparks(userId, 100);
+    return allSparks.filter(s => s.status === status);
+  }
+  
+  async getSparksForStep(stepId: string): Promise<Spark[]> {
+    const ids = await this.getStepSparkIds(stepId);
+    const sparks: Spark[] = [];
+    
+    for (const id of ids) {
+      const spark = await this.getSpark(id);
+      if (spark) sparks.push(spark);
+    }
+    
+    // Sort by createdAt descending (newest first)
+    return sparks.sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+  
+  private async getStepSparkIds(stepId: string): Promise<string[]> {
+    const data = await this.store.get(stepSparksKey(stepId));
+    return data ? JSON.parse(data) : [];
   }
   
   private async getUserSparkIds(userId: string): Promise<string[]> {
@@ -616,4 +774,12 @@ export function getSwordStore(): SwordStore {
     swordStore = new SwordStore();
   }
   return swordStore;
+}
+
+/**
+ * Reset the singleton instance (for testing).
+ * @internal
+ */
+export function resetSwordStore(): void {
+  swordStore = null;
 }
