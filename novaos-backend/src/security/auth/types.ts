@@ -48,6 +48,9 @@ export interface UserMetadata {
 /**
  * Authenticated user attached to requests.
  * This is the canonical user representation in the security layer.
+ * 
+ * Includes backward-compatibility aliases for legacy code that expects
+ * `userId` and `createdAt` as direct properties.
  */
 export interface AuthenticatedUser {
   readonly id: UserId;
@@ -56,6 +59,18 @@ export interface AuthenticatedUser {
   readonly roles: readonly UserRole[];
   readonly permissions: readonly Permission[];
   readonly metadata: UserMetadata;
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BACKWARD COMPATIBILITY ALIASES
+  // These properties mirror existing fields for legacy code compatibility.
+  // Legacy routes access `req.user.userId` and `req.user.createdAt`.
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /** @deprecated Use `id` instead. Alias for backward compatibility with legacy auth. */
+  readonly userId: string;
+  
+  /** @deprecated Use `metadata.createdAt` instead. Unix timestamp for legacy compatibility. */
+  readonly createdAt: number;
 }
 
 /**
@@ -362,17 +377,25 @@ export interface LegacyUserPayload {
 
 /**
  * Convert legacy payload to AuthenticatedUser.
+ * Includes backward-compatibility properties for legacy route handlers.
  */
 export function fromLegacyPayload(payload: LegacyUserPayload): AuthenticatedUser {
+  const createdAtTimestamp = new Date(payload.createdAt).toISOString() as Timestamp;
+  
   return {
+    // New canonical properties
     id: payload.userId as UserId,
     email: payload.email,
     tier: payload.tier,
     roles: [payload.tier === 'enterprise' ? 'premium' : 'user'],
     permissions: getDefaultPermissions(payload.tier),
     metadata: {
-      createdAt: new Date(payload.createdAt).toISOString() as Timestamp,
+      createdAt: createdAtTimestamp,
     },
+    
+    // Backward compatibility aliases
+    userId: payload.userId,
+    createdAt: payload.createdAt,
   };
 }
 
@@ -384,7 +407,7 @@ export function toLegacyPayload(user: AuthenticatedUser): LegacyUserPayload {
     userId: user.id as string,
     email: user.email,
     tier: user.tier,
-    createdAt: new Date(user.metadata.createdAt).getTime(),
+    createdAt: user.createdAt,
   };
 }
 

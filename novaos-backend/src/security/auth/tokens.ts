@@ -404,21 +404,32 @@ function mapJwtError(error: unknown): TokenError {
 
 /**
  * Convert JWT payload to AuthenticatedUser.
+ * Includes backward-compatibility properties for legacy route handlers.
  */
 function payloadToUser(payload: JWTPayload): AuthenticatedUser {
   const userId = payload.sub as UserId;
   const tier = payload.tier;
   const roles = payload.roles ?? ['user'];
+  
+  // Calculate createdAt as Unix timestamp from JWT iat claim
+  const createdAtUnix = payload.iat * 1000;
+  const createdAtTimestamp = createTimestamp(new Date(createdAtUnix));
 
   return {
+    // New canonical properties
     id: userId,
     email: payload.email,
     tier,
     roles,
     permissions: getDefaultPermissions(tier),
     metadata: {
-      createdAt: createTimestamp(new Date(payload.iat * 1000)),
+      createdAt: createdAtTimestamp,
     },
+    
+    // Backward compatibility aliases for legacy routes
+    // Legacy code accesses req.user.userId and req.user.createdAt
+    userId: payload.sub,
+    createdAt: createdAtUnix,
   };
 }
 
