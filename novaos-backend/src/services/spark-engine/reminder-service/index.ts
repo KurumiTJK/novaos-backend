@@ -141,10 +141,6 @@ export type {
   IReminderStore,
   ReminderServiceConfig,
 
-  // Message generator types
-  MessageContext,
-  GeneratedMessage,
-
   // Additional types
   DeliveryChannel,
   ReminderPriority,

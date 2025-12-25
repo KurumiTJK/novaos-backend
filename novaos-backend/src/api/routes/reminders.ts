@@ -182,7 +182,8 @@ export function createReminderRouter(): Router {
       const currentConfig = await getUserReminderConfig(userId);
       
       // Merge updates (currentConfig provides all required fields)
-      const newConfig: ReminderConfig = {
+      // Use type assertion since spread merging widens literal types
+      const newConfig = {
         ...currentConfig,
         ...updates,
         schedule: updates.schedule
@@ -194,7 +195,7 @@ export function createReminderRouter(): Router {
         quietHours: updates.quietHours
           ? { ...currentConfig.quietHours, ...updates.quietHours }
           : currentConfig.quietHours,
-      };
+      } as ReminderConfig;
       
       // Save updated config
       const savedConfig = await saveUserReminderConfig(userId, newConfig);

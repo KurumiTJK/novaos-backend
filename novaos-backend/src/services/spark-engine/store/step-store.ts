@@ -335,7 +335,7 @@ export class StepStore extends SecureStore<Step, StepId> implements IStepStore {
     if (!result.ok) {
       return result;
     }
-    return ok(result.value.length > 0 ? result.value[0] : null);
+    return ok(result.value.length > 0 ? result.value[0] ?? null : null);
   }
 
   /**
@@ -346,7 +346,7 @@ export class StepStore extends SecureStore<Step, StepId> implements IStepStore {
     if (!result.ok) {
       return result;
     }
-    return ok(result.value.length > 0 ? result.value[0] : null);
+    return ok(result.value.length > 0 ? result.value[0] ?? null : null);
   }
 
   /**

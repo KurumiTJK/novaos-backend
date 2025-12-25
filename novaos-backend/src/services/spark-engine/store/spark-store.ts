@@ -471,7 +471,7 @@ export class SparkStore extends SecureStore<Spark, SparkId> implements ISparkSto
     if (!sparksResult.ok) {
       return sparksResult;
     }
-    return ok(sparksResult.value.items.length > 0 ? sparksResult.value.items[0] : null);
+    return ok(sparksResult.value.items.length > 0 ? sparksResult.value.items[0] ?? null : null);
   }
 
   /**

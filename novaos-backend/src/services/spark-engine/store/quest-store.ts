@@ -250,7 +250,7 @@ export class QuestStore extends SecureStore<Quest, QuestId> implements IQuestSto
       return result;
     }
     // Return the first active quest (by order)
-    return ok(result.value.length > 0 ? result.value[0] : null);
+    return ok(result.value.length > 0 ? result.value[0] ?? null : null);
   }
 
   /**
@@ -262,7 +262,7 @@ export class QuestStore extends SecureStore<Quest, QuestId> implements IQuestSto
       return result;
     }
     // Return the first pending quest (by order)
-    return ok(result.value.length > 0 ? result.value[0] : null);
+    return ok(result.value.length > 0 ? result.value[0] ?? null : null);
   }
 
   /**

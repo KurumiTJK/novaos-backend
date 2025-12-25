@@ -419,7 +419,7 @@ export class LessonPlanGenerator {
     const themes = days.map((d) => d.theme);
     const allTopics = days.flatMap((d) =>
       d.resources.map((r) => r.title.split(':')[0])
-    );
+    ).filter((t): t is string => t !== undefined);
     const uniqueTopics = [...new Set(allTopics)].slice(0, 5);
 
     return {
@@ -436,7 +436,7 @@ export class LessonPlanGenerator {
    */
   private summarizeThemes(themes: readonly string[]): string {
     if (themes.length === 0) return 'Learning';
-    if (themes.length === 1) return themes[0];
+    if (themes.length === 1) return themes[0] ?? 'Learning';
 
     // Find common words
     const words = themes.flatMap((t) => t.toLowerCase().split(/\s+/));
@@ -459,7 +459,7 @@ export class LessonPlanGenerator {
         .join(' & ');
     }
 
-    return themes[0].split(' ').slice(0, 3).join(' ');
+    return (themes[0] ?? 'Learning').split(' ').slice(0, 3).join(' ');
   }
 
   /**
@@ -544,7 +544,7 @@ export class LessonPlanGenerator {
   private getDefaultStartDate(): string {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+    return tomorrow.toISOString().split('T')[0] ?? '';
   }
 
   /**

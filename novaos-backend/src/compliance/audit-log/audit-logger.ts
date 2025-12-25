@@ -217,8 +217,8 @@ export class AuditLogger implements IAuditLogger {
     return this.log('authentication', action, {
       userId,
       description: details?.reason
-        ? `${actionDescriptions[action]}: ${details.reason}`
-        : actionDescriptions[action],
+        ? `${actionDescriptions[action] ?? 'Authentication event'}: ${details.reason}`
+        : (actionDescriptions[action] ?? 'Authentication event'),
       severity,
       success,
       request,
@@ -251,7 +251,7 @@ export class AuditLogger implements IAuditLogger {
     };
 
     return this.log('retention', action, {
-      description: actionDescriptions[action],
+      description: actionDescriptions[action] ?? 'Retention event',
       entityType: 'retention_job',
       entityId: details.jobId,
       details: {
@@ -293,7 +293,7 @@ export class AuditLogger implements IAuditLogger {
     const severity = action === 'system.error' ? 'error' : 'info';
     const success = action !== 'system.error';
 
-    let description = actionDescriptions[action];
+    let description: string = actionDescriptions[action] ?? 'System event';
     if (details.component) {
       description = `${description} (${details.component})`;
     }

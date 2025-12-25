@@ -193,7 +193,7 @@ export function createQuestRouter(): Router {
         goalId: input.goalId,
         title: input.title,
         description: input.description ?? '',
-        outcome: input.outcome ?? '',
+        outcome: '',  // Default - API schema doesn't expose this field
         order: input.order,
         estimatedMinutes: input.estimatedMinutes,
       });
