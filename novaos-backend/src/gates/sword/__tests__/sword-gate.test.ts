@@ -160,21 +160,23 @@ describe('ModeDetector', () => {
   });
 
   describe('without refinement state', () => {
-    it('should detect goal creation intent', async () => {
+    it('should detect vague goal and route to explore', async () => {
       const result = await detector.detect(
         { userId: TEST_USER_ID, message: 'I want to learn Rust' },
         null
       );
-      expect(result.mode).toBe('capture');
+      // Phase 14A: Vague goals route to explore mode for crystallization
+      expect(result.mode).toBe('explore');
       expect(result.isContinuation).toBe(false);
     });
 
-    it('should detect "teach me" pattern', async () => {
+    it('should detect vague "teach me" pattern and route to explore', async () => {
       const result = await detector.detect(
         { userId: TEST_USER_ID, message: 'Teach me Python' },
         null
       );
-      expect(result.mode).toBe('capture');
+      // Phase 14A: Vague learning requests route to explore
+      expect(result.mode).toBe('explore');
     });
 
     it('should default to capture for ambiguous input', async () => {

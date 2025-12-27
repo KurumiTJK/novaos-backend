@@ -1,22 +1,25 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE — Goal Creation Pipeline Gate
-// NovaOS Gates — Phase 13: SwordGate Integration
+// NovaOS Gates — Phase 14A: SwordGate Explore Module
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Constitution §2.3: Sword — Forward Motion
 //
 // SwordGate orchestrates goal creation through:
-//   1. Mode Detection — Determine capture/refine/suggest/create/modify
-//   2. Goal Capture — Extract and sanitize goal statement
-//   3. Refinement Flow — Multi-turn clarification conversation
-//   4. Plan Generation — Create lesson plan proposal
-//   5. Confirmation — User confirms before creation
-//   6. Goal Creation — Create goal via SparkEngine
+//   1. Mode Detection — Determine capture/explore/refine/suggest/create/modify
+//   2. Goal Exploration — NEW: Dialogue for crystallizing vague goals
+//   3. Goal Capture — Extract and sanitize goal statement
+//   4. Refinement Flow — Multi-turn clarification conversation
+//   5. Plan Generation — Create lesson plan proposal
+//   6. Confirmation — User confirms before creation
+//   7. Goal Creation — Create goal via SparkEngine
 //
 // Integration points:
 //   - ModeDetector: Classify user intent
+//   - ExploreFlow: Goal crystallization dialogue (NEW)
 //   - RefinementFlow: Manage multi-turn conversation
 //   - SwordRefinementStore: Persist refinement state
+//   - ExploreStore: Persist exploration state (NEW)
 //   - GoalStatementSanitizer: Validate and sanitize input
 //   - LessonPlanGenerator: Generate curriculum proposals
 //   - ISparkEngine: Create goals and quests
@@ -51,6 +54,7 @@ import type {
   LessonPlanProposal,
   GoalRateLimitInfo,
   CreatedGoalResult,
+  ExploreContext,
 } from './types.js';
 import { DEFAULT_SWORD_GATE_CONFIG, hasRequiredFields, getMissingRequiredFields } from './types.js';
 
@@ -64,6 +68,12 @@ import {
   type IResourceDiscoveryService,
   type ICurriculumService,
 } from './lesson-plan-generator.js';
+
+// Phase 14A: Import explore components
+import type { ExploreState } from './explore/types.js';
+import { ExploreStore, createExploreStore } from './explore/explore-store.js';
+import { ExploreFlow, createExploreFlow } from './explore/explore-flow.js';
+import { ClarityDetector, createClarityDetector } from './explore/clarity-detector.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // RATE LIMITER INTERFACE
@@ -92,7 +102,7 @@ export interface IGoalRateLimiter {
  * SwordGate — Goal Creation Pipeline Gate
  *
  * Orchestrates the goal creation flow from initial capture through
- * refinement, plan generation, and final creation.
+ * exploration, refinement, plan generation, and final creation.
  */
 export class SwordGate {
   readonly gateId: GateId = 'spark'; // Uses 'spark' gate ID for pipeline compatibility
@@ -105,6 +115,11 @@ export class SwordGate {
   private readonly planGenerator: LessonPlanGenerator;
   private readonly sparkEngine?: ISparkEngine;
   private readonly rateLimiter?: IGoalRateLimiter;
+
+  // Phase 14A: Explore components
+  private readonly exploreStore: ExploreStore;
+  private readonly exploreFlow: ExploreFlow;
+  private readonly clarityDetector: ClarityDetector;
 
   constructor(
     baseRefinementStore: IRefinementStore,
@@ -129,6 +144,17 @@ export class SwordGate {
       options.resourceService,
       options.curriculumService
     );
+
+    // Phase 14A: Initialize explore components
+    this.exploreStore = createExploreStore(baseRefinementStore, {
+      maxTurns: this.config.maxExploreTurns,
+      exploreTtlSeconds: this.config.exploreTtlSeconds,
+    });
+    this.exploreFlow = createExploreFlow(options.openaiApiKey, {
+      maxTurns: this.config.maxExploreTurns,
+      clarityThreshold: this.config.exploreClarityThreshold,
+    });
+    this.clarityDetector = createClarityDetector(options.openaiApiKey);
 
     this.sparkEngine = options.sparkEngine;
     this.rateLimiter = options.rateLimiter;
@@ -158,12 +184,21 @@ export class SwordGate {
       }
       const refinementState = stateResult.value;
 
-      // Detect mode
-      const modeResult = await this.modeDetector.detect(input, refinementState);
+      // Phase 14A: Get existing explore state
+      let exploreState: ExploreState | null = null;
+      if (this.config.enableExplore) {
+        const exploreResult = await this.exploreStore.get(input.userId);
+        if (exploreResult.ok) {
+          exploreState = exploreResult.value;
+        }
+      }
+
+      // Detect mode (Phase 14A: pass explore state)
+      const modeResult = await this.modeDetector.detect(input, refinementState, exploreState);
       console.log(`[SWORD_GATE] Mode detected: ${modeResult.mode} (${modeResult.detectionMethod})`);
 
       // Execute mode-specific handler
-      const output = await this.executeMode(input, refinementState, modeResult.mode);
+      const output = await this.executeMode(input, refinementState, exploreState, modeResult);
 
       return {
         gateId: this.gateId,
@@ -192,13 +227,27 @@ export class SwordGate {
   private async executeMode(
     input: SwordGateInput,
     refinementState: SwordRefinementState | null,
-    mode: SwordGateMode
+    exploreState: ExploreState | null,
+    modeResult: { mode: SwordGateMode; bypassExplore?: boolean; bypassReason?: string }
   ): Promise<SwordGateOutput> {
+    const { mode, bypassExplore, bypassReason } = modeResult;
+
     switch (mode) {
       case 'capture':
-        return this.handleCapture(input);
+        // Phase 14A: Check if we should route to explore or bypass
+        if (this.config.enableExplore && !bypassExplore) {
+          return this.handleCaptureWithExplore(input);
+        }
+        return this.handleCapture(input, bypassReason === 'clear_goal');
+
+      case 'explore':
+        return this.handleExplore(input, exploreState);
 
       case 'refine':
+        // Phase 14A: Check for explore context transition
+        if (exploreState && !this.isExploreTerminal(exploreState)) {
+          return this.handleExploreToRefine(input, exploreState);
+        }
         return this.handleRefine(input, refinementState!);
 
       case 'suggest':
@@ -220,13 +269,233 @@ export class SwordGate {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // EXPLORE MODE (Phase 14A - NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handle capture with explore check - determines if explore is needed.
+   */
+  private async handleCaptureWithExplore(input: SwordGateInput): Promise<SwordGateOutput> {
+    // Check clarity of the goal statement
+    const clarityResult = await this.clarityDetector.detect(input.message);
+
+    // If goal is clear enough, skip explore
+    if (clarityResult.isClear) {
+      console.log(`[SWORD_GATE] Goal is clear (${clarityResult.score}), skipping explore`);
+      return this.handleCapture(input, true);
+    }
+
+    // If user wants to skip exploration
+    if (this.clarityDetector.isSkipRequest(input.message)) {
+      console.log('[SWORD_GATE] User requested to skip exploration');
+      return this.handleCapture(input, true);
+    }
+
+    // Start exploration for vague goal
+    console.log(`[SWORD_GATE] Goal is vague (${clarityResult.score}), starting explore`);
+    return this.handleExploreStart(input);
+  }
+
+  /**
+   * Start a new exploration session.
+   */
+  private async handleExploreStart(input: SwordGateInput): Promise<SwordGateOutput> {
+    // Start exploration flow
+    const result = await this.exploreFlow.startExploration(input.userId, input.message);
+
+    if (!result.ok) {
+      console.error('[SWORD_GATE] Failed to start exploration:', result.error);
+      // Fall back to regular capture
+      return this.handleCapture(input, false);
+    }
+
+    const { state, response } = result.value;
+
+    // Save explore state
+    const saveResult = await this.exploreStore.save(state);
+    if (!saveResult.ok) {
+      console.error('[SWORD_GATE] Failed to save explore state:', saveResult.error);
+    }
+
+    return {
+      mode: 'explore',
+      explorationInProgress: true,
+      clarityScore: state.clarityScore,
+      responseMessage: response,
+      suppressModelGeneration: true,
+    };
+  }
+
+  /**
+   * Continue an existing exploration session.
+   */
+  private async handleExplore(
+    input: SwordGateInput,
+    exploreState: ExploreState | null
+  ): Promise<SwordGateOutput> {
+    // If no explore state, start new exploration
+    if (!exploreState) {
+      return this.handleExploreStart(input);
+    }
+
+    // Check for expiration
+    if (this.exploreStore.isExpired(exploreState)) {
+      await this.exploreStore.delete(input.userId);
+      return {
+        mode: 'capture',
+        responseMessage: 'Your exploration session has expired. What would you like to learn?',
+        suppressModelGeneration: true,
+      };
+    }
+
+    // Check for skip request
+    if (this.clarityDetector.isSkipRequest(input.message)) {
+      const skipResult = await this.exploreFlow.handleSkip(exploreState, input.message);
+      if (skipResult.ok) {
+        await this.exploreStore.skip(input.userId);
+        return this.handleExploreToRefine(input, skipResult.value.state);
+      }
+    }
+
+    // Check for confirmation of proposed goal
+    if (exploreState.stage === 'proposing' && this.clarityDetector.isConfirmation(input.message)) {
+      await this.exploreStore.updateStage(input.userId, 'confirmed');
+      return this.handleExploreToRefine(input, exploreState);
+    }
+
+    // Continue exploration
+    const result = await this.exploreFlow.continueExploration(exploreState, input.message);
+
+    if (!result.ok) {
+      console.error('[SWORD_GATE] Exploration continue failed:', result.error);
+      return {
+        mode: 'explore',
+        explorationInProgress: true,
+        responseMessage: "I'm having trouble understanding. Could you tell me more about what you're hoping to achieve?",
+        suppressModelGeneration: true,
+      };
+    }
+
+    const { state: updatedState, response, shouldTransition, transitionReason } = result.value;
+
+    // Save updated state
+    await this.exploreStore.save(updatedState);
+
+    // Check if we should transition to refine
+    if (shouldTransition) {
+      console.log(`[SWORD_GATE] Transitioning from explore to refine: ${transitionReason}`);
+      return this.handleExploreToRefine(input, updatedState);
+    }
+
+    return {
+      mode: 'explore',
+      explorationInProgress: true,
+      clarityScore: updatedState.clarityScore,
+      responseMessage: response,
+      suppressModelGeneration: true,
+    };
+  }
+
+  /**
+   * Transition from explore to refine with context.
+   */
+  private async handleExploreToRefine(
+    input: SwordGateInput,
+    exploreState: ExploreState
+  ): Promise<SwordGateOutput> {
+    // Build explore context for refinement
+    const context = this.exploreStore.buildContext(exploreState);
+
+    // Get crystallized goal or synthesize one
+    const goalStatement = exploreState.crystallizedGoal ?? exploreState.initialStatement;
+
+    // Clean up explore state
+    await this.exploreStore.delete(input.userId);
+
+    // Sanitize the goal statement
+    const sanitizeResult = this.sanitizer.sanitize(goalStatement);
+
+    if (!sanitizeResult.valid) {
+      return {
+        mode: 'capture',
+        responseMessage: sanitizeResult.errorMessage ?? 'Please provide a valid learning goal.',
+        suppressModelGeneration: true,
+      };
+    }
+
+    // Check rate limits
+    if (this.rateLimiter) {
+      const limitResult = await this.rateLimiter.canCreateGoal(input.userId);
+      if (limitResult.ok && limitResult.value.exceeded) {
+        return {
+          mode: 'capture',
+          rateLimit: limitResult.value,
+          responseMessage: limitResult.value.message,
+          suppressModelGeneration: true,
+        };
+      }
+    }
+
+    // Initiate refinement with explore context
+    const newState = this.refinementFlow.initiate(
+      input.userId,
+      sanitizeResult.sanitized!,
+      input.userPreferences
+    );
+
+    // Add explore context to inputs
+    const stateWithContext: SwordRefinementState = {
+      ...newState,
+      inputs: {
+        ...newState.inputs,
+        exploreContext: context,
+      },
+    };
+
+    // Save refinement state
+    const saveResult = await this.refinementStore.save(stateWithContext);
+    if (!saveResult.ok) {
+      console.error('[SWORD_GATE] Failed to save refinement state:', saveResult.error);
+    }
+
+    // Get the first question
+    const nextQuestion = this.refinementFlow.getNextQuestion(stateWithContext);
+
+    // Build a response that acknowledges the exploration
+    const response = context
+      ? `Great! So you want to ${goalStatement}. ${nextQuestion ?? ''}`
+      : `Got it! I'll help you ${goalStatement}. ${nextQuestion ?? ''}`;
+
+    return {
+      mode: 'refine',
+      exploreContext: context,
+      clarityScore: exploreState.clarityScore,
+      nextQuestion: nextQuestion ?? undefined,
+      refinementProgress: 0.25,
+      missingFields: getMissingRequiredFields(stateWithContext.inputs),
+      responseMessage: response,
+      suppressModelGeneration: true,
+    };
+  }
+
+  /**
+   * Check if explore state is terminal.
+   */
+  private isExploreTerminal(state: ExploreState): boolean {
+    return ['confirmed', 'skipped', 'expired'].includes(state.stage);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // CAPTURE MODE
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Handle capture mode — extract goal statement and start refinement.
    */
-  private async handleCapture(input: SwordGateInput): Promise<SwordGateOutput> {
+  private async handleCapture(
+    input: SwordGateInput,
+    skipExplore: boolean = false
+  ): Promise<SwordGateOutput> {
     // Sanitize the goal statement
     const sanitizeResult = this.sanitizer.sanitize(input.message);
 

@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE TYPES — Goal Creation Pipeline Gate
-// NovaOS Gates — Phase 13: SwordGate Integration
+// NovaOS Gates — Phase 14A: SwordGate Explore Module
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Type definitions for SwordGate:
-//   - SwordGateMode: Operating modes (capture, refine, suggest, create, modify)
+//   - SwordGateMode: Operating modes (capture, explore, refine, suggest, create, modify)
 //   - SwordGateInput: Pipeline input to the gate
 //   - SwordGateOutput: Gate result with mode-specific data
 //   - SwordRefinementState: Extended refinement state for goal creation
@@ -29,6 +29,12 @@ import type {
 } from '../../services/spark-engine/types.js';
 import type { Intent, RiskSummary, Stance } from '../../helpers/types.js';
 
+// Phase 14A: Import ExploreContext
+import type { ExploreContext } from './explore/types.js';
+
+// Re-export for convenience
+export type { ExploreContext };
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE MODES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -39,13 +45,15 @@ import type { Intent, RiskSummary, Stance } from '../../helpers/types.js';
  * The gate transitions through these modes during goal creation:
  *
  * 1. capture  → Extract goal statement from user message
- * 2. refine   → Multi-turn clarification of learning preferences
- * 3. suggest  → Generate and display lesson plan proposal
- * 4. create   → Create goal and quests after user confirmation
- * 5. modify   → Update existing goals
+ * 2. explore  → NEW: Goal crystallization dialogue for vague goals
+ * 3. refine   → Multi-turn clarification of learning preferences
+ * 4. suggest  → Generate and display lesson plan proposal
+ * 5. create   → Create goal and quests after user confirmation
+ * 6. modify   → Update existing goals
  */
 export type SwordGateMode =
   | 'capture'   // Initial goal statement extraction
+  | 'explore'   // NEW: Goal crystallization dialogue
   | 'refine'    // Multi-turn clarification
   | 'suggest'   // Show proposed lesson plan
   | 'create'    // Create goal after confirmation
@@ -56,6 +64,7 @@ export type SwordGateMode =
  */
 export const SWORD_GATE_MODES: readonly SwordGateMode[] = [
   'capture',
+  'explore',  // NEW
   'refine',
   'suggest',
   'create',
@@ -238,6 +247,7 @@ export interface CreatedGoalResult {
  *
  * The output varies based on the mode:
  * - capture: Extracted goal statement, transition to refine
+ * - explore: Exploration dialogue response
  * - refine: Next question to ask, updated refinement state
  * - suggest: Proposed lesson plan for confirmation
  * - create: Created goal and quests
@@ -246,6 +256,19 @@ export interface CreatedGoalResult {
 export interface SwordGateOutput {
   /** Detected/executed mode */
   readonly mode: SwordGateMode;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Exploration Flow (NEW - Phase 14A)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Whether exploration is in progress */
+  readonly explorationInProgress?: boolean;
+
+  /** Exploration context (when transitioning from explore to refine) */
+  readonly exploreContext?: ExploreContext;
+
+  /** Clarity score from exploration (0-1) */
+  readonly clarityScore?: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Refinement Flow
@@ -280,7 +303,7 @@ export interface SwordGateOutput {
   /** Created goal result (create mode) */
   readonly createdGoal?: CreatedGoalResult;
 
-  /** Rate limit info (if creation blocked) */
+  /** Rate limit information */
   readonly rateLimit?: GoalRateLimitInfo;
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -400,6 +423,13 @@ export interface SwordRefinementInputs {
 
   /** Last reminder hour (0-23) */
   readonly lastReminderHour?: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // NEW: Explore context (Phase 14A)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Context from exploration phase */
+  readonly exploreContext?: ExploreContext;
 }
 
 /**
@@ -486,6 +516,22 @@ export interface SwordGateConfig {
 
   /** OpenAI model for classification */
   readonly llmModel: string;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // NEW: Explore configuration (Phase 14A)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Enable explore phase for vague goals (default: true) */
+  readonly enableExplore: boolean;
+
+  /** Maximum explore turns before forced transition (default: 12) */
+  readonly maxExploreTurns: number;
+
+  /** Clarity threshold to skip explore (default: 0.8) */
+  readonly exploreClarityThreshold: number;
+
+  /** Explore state TTL in seconds (default: 7200 = 2 hours) */
+  readonly exploreTtlSeconds: number;
 }
 
 /**
@@ -503,6 +549,11 @@ export const DEFAULT_SWORD_GATE_CONFIG: SwordGateConfig = {
   maxGoalStatementLength: 500,
   useLlmModeDetection: true,
   llmModel: 'gpt-4o-mini',
+  // NEW: Explore config
+  enableExplore: true,
+  maxExploreTurns: 12,
+  exploreClarityThreshold: 0.8,
+  exploreTtlSeconds: 2 * 60 * 60, // 2 hours
 } as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════

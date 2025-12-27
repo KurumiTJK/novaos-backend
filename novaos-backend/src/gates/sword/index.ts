@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE MODULE — Exports
-// NovaOS Gates — Phase 13: SwordGate Integration
+// NovaOS Gates — Phase 14A+14B: SwordGate Explore + Refine Modules
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -28,6 +28,8 @@ export type {
   GoalRateLimitInfo,
   CreatedGoalResult,
   RefinementField,
+  // Phase 14A: Export ExploreContext
+  ExploreContext,
 } from './types.js';
 
 export {
@@ -101,3 +103,91 @@ export {
   DEFAULT_RATE_LIMITER_CONFIG,
 } from './rate-limiter.js';
 export type { GoalRateLimiterConfig } from './rate-limiter.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// Explore Module (Phase 14A)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  // Types
+  type ExploreState,
+  type ExploreStage,
+  type ExploreMessage,
+  type ExploreConfig,
+  type ClarityDetectionResult,
+  // Type guards
+  isExploreStage,
+  isExploreTerminal,
+  canContinueExploring,
+  // Factories
+  createEmptyExploreContext,
+  buildExploreContext,
+  DEFAULT_EXPLORE_CONFIG,
+} from './explore/types.js';
+
+export {
+  ExploreStore,
+  createExploreStore,
+} from './explore/explore-store.js';
+
+export {
+  ClarityDetector,
+  createClarityDetector,
+} from './explore/clarity-detector.js';
+
+export {
+  ExploreFlow,
+  createExploreFlow,
+} from './explore/explore-flow.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// Refine Module (Phase 14B)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  // Types
+  type VolatilityCategory,
+  type VolatilitySignal,
+  type VolatilityAssessment,
+  type VolatilityThresholds,
+  type TopicDifficulty,
+  type ScopeAssessment,
+  type TopicNode,
+  type Prerequisite,
+  type LearningPath,
+  type DeprecationWarning,
+  type FreshnessInfo,
+  type TopicLandscape,
+  type RefineContext,
+  type PrerequisiteAssessmentResult,
+  type PrerequisiteStatus,
+  type WebSearchRequest,
+  type WebSearchResult,
+  type WebSearchResponse,
+  type IWebSearchService,
+  type RefineModuleConfig,
+  // Constants
+  VOLATILITY_CATEGORIES,
+  TOPIC_DIFFICULTIES,
+  SCOPE_ASSESSMENTS,
+  DEFAULT_VOLATILITY_THRESHOLDS,
+  DEFAULT_REFINE_CONFIG,
+  // Type Guards
+  isVolatilityCategory,
+  isTopicDifficulty,
+  isScopeAssessment,
+  // Factories
+  createStableVolatilityAssessment,
+  createHighVolatilityAssessment,
+  createMinimalLandscape,
+} from './refine/types.js';
+
+export {
+  VolatilityDetector,
+  createVolatilityDetector,
+} from './refine/volatility-detector.js';
+
+export {
+  TopicLandscapeGenerator,
+  createTopicLandscapeGenerator,
+} from './refine/topic-landscape-generator.js';
