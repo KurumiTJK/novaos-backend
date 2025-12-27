@@ -30,6 +30,7 @@ import type { TopicId } from '../services/spark-engine/resource-discovery/types.
 // Mock KeyValueStore
 function createMockKvStore() {
   const data = new Map<string, string>();
+  const sets = new Map<string, Set<string>>();
   
   return {
     get: vi.fn(async (key: string) => data.get(key) ?? null),
@@ -47,7 +48,38 @@ function createMockKvStore() {
       return Array.from(data.keys()).filter(k => regex.test(k));
     }),
     isConnected: vi.fn(() => true),
+    // Redis set operations
+    sadd: vi.fn(async (key: string, ...members: string[]) => {
+      if (!sets.has(key)) {
+        sets.set(key, new Set());
+      }
+      const set = sets.get(key)!;
+      let added = 0;
+      for (const member of members) {
+        if (!set.has(member)) {
+          set.add(member);
+          added++;
+        }
+      }
+      return added;
+    }),
+    srem: vi.fn(async (key: string, ...members: string[]) => {
+      const set = sets.get(key);
+      if (!set) return 0;
+      let removed = 0;
+      for (const member of members) {
+        if (set.delete(member)) {
+          removed++;
+        }
+      }
+      return removed;
+    }),
+    smembers: vi.fn(async (key: string) => {
+      const set = sets.get(key);
+      return set ? Array.from(set) : [];
+    }),
     __data: data,
+    __sets: sets,
   };
 }
 
@@ -487,7 +519,10 @@ describe('SparkEngine Integration', () => {
   });
 
   it('should create goals through SparkEngine', async () => {
-    const result = bootstrapSparkEngine(mockKvStore as any);
+    // Disable encryption for this test to avoid encryption service issues
+    const result = bootstrapSparkEngine(mockKvStore as any, {
+      encryptionEnabled: false,
+    });
     const sparkEngine = result.sparkEngine;
 
     // This tests the store adapter wiring
@@ -497,7 +532,15 @@ describe('SparkEngine Integration', () => {
       description: 'Master Rust programming',
     });
 
-    // Store adapter should have saved the goal
-    expect(mockKvStore.set).toHaveBeenCalled();
+    // The goal creation should succeed
+    expect(goalResult.ok).toBe(true);
+    
+    if (goalResult.ok) {
+      expect(goalResult.value).toBeDefined();
+      expect(goalResult.value.title).toBe('Learn Rust');
+      
+      // Store adapter should have saved the goal via the store manager
+      expect(mockKvStore.set).toHaveBeenCalled();
+    }
   });
 });

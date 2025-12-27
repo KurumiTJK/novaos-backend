@@ -654,20 +654,35 @@ export class PrerequisiteAssessor {
       // Try to find the topic mentioned with a level
       const topicIndex = responseLower.indexOf(topicLower);
       if (topicIndex !== -1) {
-        // Look for level keywords ONLY AFTER the topic, up to next delimiter
+        // Find clause boundaries (delimiters that separate topic discussions)
+        const beforeTopic = responseLower.substring(0, topicIndex);
         const afterTopic = responseLower.substring(topicIndex + topicLower.length);
-        const delimiterMatch = afterTopic.match(/[,;]/);
-        const endIndex = delimiterMatch ? delimiterMatch.index! : afterTopic.length;
-        const levelText = afterTopic.substring(0, Math.min(endIndex, 30)).trim();
+        
+        // Find the start of this clause (after last delimiter before topic)
+        const lastDelimiterBefore = Math.max(
+          beforeTopic.lastIndexOf(','),
+          beforeTopic.lastIndexOf(';'),
+          beforeTopic.lastIndexOf('.'),
+          beforeTopic.lastIndexOf(' but '),
+          beforeTopic.lastIndexOf(' and ')
+        );
+        const clauseStart = lastDelimiterBefore >= 0 ? lastDelimiterBefore : 0;
+        
+        // Find the end of this clause (next delimiter after topic)
+        const delimiterMatch = afterTopic.match(/[,;.]|\s+but\s+|\s+and\s+/);
+        const clauseEndOffset = delimiterMatch ? delimiterMatch.index! : afterTopic.length;
+        
+        // Extract the clause containing this topic
+        const clauseText = beforeTopic.substring(clauseStart) + afterTopic.substring(0, clauseEndOffset);
 
         // Check patterns in order of specificity
-        if (levelText.match(/\b(proficient|expert|advanced)\b/)) {
+        if (clauseText.match(/\b(proficient|expert|advanced)\b/)) {
           result[prereq.topic] = 'proficient';
-        } else if (levelText.match(/\b(familiar|basics?|some)\b/)) {
+        } else if (clauseText.match(/\b(familiar|basics?|some)\b/)) {
           result[prereq.topic] = 'familiar';
-        } else if (levelText.match(/\b(rusty|review|refresh|forgot)\b/)) {
+        } else if (clauseText.match(/\b(rusty|review|refresh|forgot)\b/)) {
           result[prereq.topic] = 'needs_review';
-        } else if (levelText.match(/\b(new|never|don't|no|none)\b/)) {
+        } else if (clauseText.match(/\b(new|never|don't|no|none)\b/)) {
           result[prereq.topic] = 'needs_learning';
         }
       }
