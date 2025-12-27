@@ -80,6 +80,8 @@ const QUESTION_TEMPLATES: Record<RefinementField, readonly string[]> = {
 
 /**
  * Get a question for a field, with topic substitution.
+ * Converts bare verbs to gerund form for better grammar.
+ * "sing" → "singing", "cook" → "cooking"
  */
 function getQuestionForField(field: RefinementField, topic?: string): string {
   const templates = QUESTION_TEMPLATES[field];
@@ -87,7 +89,54 @@ function getQuestionForField(field: RefinementField, topic?: string): string {
     return `Please provide your ${field}.`;
   }
   const template = templates[Math.floor(Math.random() * templates.length)]!;
-  return template.replace('{topic}', topic ?? 'this topic');
+  
+  // Convert bare verbs to gerund form for natural grammar
+  // "How familiar are you with sing?" → "How familiar are you with singing?"
+  const topicForQuestion = toGerundIfVerb(topic ?? 'this topic');
+  
+  return template.replace('{topic}', topicForQuestion);
+}
+
+/**
+ * Convert bare verbs to gerund form (-ing) for natural grammar in questions.
+ * "sing" → "singing", "cook" → "cooking"
+ * Leaves noun-based topics unchanged: "rust" → "rust", "python" → "python"
+ */
+function toGerundIfVerb(topic: string): string {
+  const normalized = topic.toLowerCase().trim();
+  
+  // Common bare verbs that sound wrong without -ing in "familiar with X"
+  const verbToGerund: Record<string, string> = {
+    'sing': 'singing',
+    'cook': 'cooking',
+    'code': 'coding',
+    'draw': 'drawing',
+    'paint': 'painting',
+    'write': 'writing',
+    'read': 'reading',
+    'swim': 'swimming',
+    'dance': 'dancing',
+    'run': 'running',
+    'skate': 'skating',
+    'ski': 'skiing',
+    'surf': 'surfing',
+    'drive': 'driving',
+    'bake': 'baking',
+    'sew': 'sewing',
+    'knit': 'knitting',
+    'garden': 'gardening',
+    'fish': 'fishing',
+    'hunt': 'hunting',
+    'meditate': 'meditating',
+    'negotiate': 'negotiating',
+    'present': 'presenting',
+    'lead': 'leading',
+    'manage': 'managing',
+    'play': 'playing',
+    'fly': 'flying',
+  };
+  
+  return verbToGerund[normalized] ?? topic;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

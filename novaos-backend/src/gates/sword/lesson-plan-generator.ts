@@ -589,10 +589,20 @@ export class LessonPlanGenerator {
     const baseDaysPerStage = Math.floor(totalDays / stages.length);
     const extraDays = totalDays % stages.length;
 
+    // Track cumulative days to calculate accurate week ranges
+    let daysCovered = 0;
+
     // Build quests from capability stages
     const quests: ProposedQuest[] = stages.map((stage, index) => {
       // Distribute extra days to earlier stages
       const daysForStage = baseDaysPerStage + (index < extraDays ? 1 : 0);
+      
+      // Calculate week range for this stage
+      const startDay = daysCovered + 1;
+      const endDay = daysCovered + daysForStage;
+      daysCovered = endDay;
+      
+      const timeLabel = this.formatTimeLabel(startDay, endDay, totalDays);
       
       // Use the stage title directly - LLM is prompted to generate topic-specific titles
       // Only clean up if it's a raw stage name (REPRODUCE, MODIFY, etc.)
@@ -604,7 +614,7 @@ export class LessonPlanGenerator {
         stageTitle = stageTitle.replace(rawStageNamePattern, '').trim() || `Stage ${index + 1}`;
       }
       
-      const title = `Week ${index + 1}: ${stageTitle}`;
+      const title = `${timeLabel}: ${stageTitle}`;
       
       return {
         title,
@@ -840,6 +850,42 @@ export class LessonPlanGenerator {
   }
 
   /**
+   * Format a time label for a stage based on its day range.
+   * Dynamically chooses between days, weeks, or week ranges.
+   * 
+   * Examples:
+   * - Days 1-3 of 14 → "Days 1-3"
+   * - Days 1-7 of 30 → "Week 1"
+   * - Days 1-18 of 90 → "Weeks 1-3"
+   * - Days 1-30 of 180 → "Month 1"
+   */
+  private formatTimeLabel(startDay: number, endDay: number, totalDays: number): string {
+    const daysInStage = endDay - startDay + 1;
+    
+    // Calculate which weeks this stage spans
+    const startWeek = Math.ceil(startDay / 7);
+    const endWeek = Math.ceil(endDay / 7);
+    
+    // For very short plans (< 14 days), use day ranges
+    if (totalDays < 14) {
+      return `Days ${startDay}-${endDay}`;
+    }
+    
+    // For plans where stages are roughly 1 week (5-9 days), use "Week N"
+    if (daysInStage <= 9 && startWeek === endWeek) {
+      return `Week ${startWeek}`;
+    }
+    
+    // For plans where stages span multiple weeks, use "Weeks N-M"
+    if (startWeek !== endWeek) {
+      return `Weeks ${startWeek}-${endWeek}`;
+    }
+    
+    // Fallback to week number
+    return `Week ${startWeek}`;
+  }
+
+  /**
    * Group curriculum days into weekly quests.
    */
   private groupDaysIntoQuests(
@@ -921,6 +967,7 @@ export class LessonPlanGenerator {
 
   /**
    * Generate a goal title from inputs.
+   * Handles grammar for verb-based topics like "sing" → "Learn to Sing"
    */
   private generateTitle(inputs: SwordRefinementInputs): string {
     const topic = inputs.extractedTopic ?? 'your topic';
@@ -931,6 +978,29 @@ export class LessonPlanGenerator {
       intermediate: 'Master',
       advanced: 'Expert',
     }[level] ?? 'Learn';
+
+    // Common bare verbs that need "to" or gerund form
+    const bareVerbs = new Set([
+      'sing', 'cook', 'code', 'draw', 'paint', 'write', 'read', 'swim',
+      'dance', 'play', 'run', 'skate', 'ski', 'surf', 'drive', 'fly',
+      'bake', 'sew', 'knit', 'crochet', 'garden', 'fish', 'hunt',
+      'meditate', 'negotiate', 'communicate', 'present', 'lead', 'manage',
+    ]);
+    
+    const normalizedTopic = topic.toLowerCase().trim();
+    
+    // If it's a bare verb, add "to" for better grammar
+    // "Learn sing" → "Learn to Sing"
+    if (bareVerbs.has(normalizedTopic)) {
+      return `${levelPrefix} to ${this.capitalize(topic)}`;
+    }
+    
+    // If it starts with "how to", remove it and add proper prefix
+    // "how to cook" → "Learn to Cook"
+    if (normalizedTopic.startsWith('how to ')) {
+      const cleanTopic = topic.replace(/^how to\s+/i, '');
+      return `${levelPrefix} to ${this.capitalize(cleanTopic)}`;
+    }
 
     return `${levelPrefix} ${this.capitalize(topic)}`;
   }
