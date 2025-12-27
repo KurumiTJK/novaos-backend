@@ -1,14 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE TYPES — Goal Creation Pipeline Gate
-// NovaOS Gates — Phase 14A: SwordGate Explore Module
+// NovaOS Gates — Phase 14B: SwordGate View Mode Extension
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Type definitions for SwordGate:
-//   - SwordGateMode: Operating modes (capture, explore, refine, suggest, create, modify)
+//   - SwordGateMode: Operating modes (capture, explore, refine, suggest, create, modify, view)
 //   - SwordGateInput: Pipeline input to the gate
 //   - SwordGateOutput: Gate result with mode-specific data
 //   - SwordRefinementState: Extended refinement state for goal creation
 //   - LessonPlanProposal: Proposed plan shown before creation
+//   - ViewTarget/ViewRequest: View mode types (Phase 14B)
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -53,23 +54,77 @@ export type { ExploreContext };
  */
 export type SwordGateMode =
   | 'capture'   // Initial goal statement extraction
-  | 'explore'   // NEW: Goal crystallization dialogue
+  | 'explore'   // Goal crystallization dialogue
   | 'refine'    // Multi-turn clarification
   | 'suggest'   // Show proposed lesson plan
   | 'create'    // Create goal after confirmation
-  | 'modify';   // Modify existing goal
+  | 'modify'    // Modify existing goal
+  | 'view';     // View existing goals/lessons/progress (Phase 14B)
 
 /**
  * All valid SwordGate modes.
  */
 export const SWORD_GATE_MODES: readonly SwordGateMode[] = [
   'capture',
-  'explore',  // NEW
+  'explore',
   'refine',
   'suggest',
   'create',
   'modify',
+  'view',     // Phase 14B
 ] as const;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VIEW MODE TYPES (Phase 14B)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Specifies what content the user wants to view.
+ */
+export type ViewTarget =
+  | 'today'       // Today's lesson and spark
+  | 'goals'       // List all user goals
+  | 'progress'    // Progress for specific goal
+  | 'plan'        // Full learning plan/curriculum
+  | 'upcoming';   // Next N days of lessons
+
+/**
+ * All valid view targets.
+ */
+export const VIEW_TARGETS: readonly ViewTarget[] = [
+  'today',
+  'goals',
+  'progress',
+  'plan',
+  'upcoming',
+] as const;
+
+/**
+ * Type guard for ViewTarget.
+ */
+export function isViewTarget(value: unknown): value is ViewTarget {
+  return typeof value === 'string' && VIEW_TARGETS.includes(value as ViewTarget);
+}
+
+/**
+ * Parsed view request with target and optional identifiers.
+ */
+export interface ViewRequest {
+  /** What to view */
+  readonly target: ViewTarget;
+
+  /** Optional goal ID for goal-specific views */
+  readonly goalId?: GoalId;
+
+  /** Optional quest ID for quest-specific views */
+  readonly questId?: QuestId;
+
+  /** Number of items to return (for 'upcoming') */
+  readonly count?: number;
+
+  /** Whether to include detailed information */
+  readonly detailed?: boolean;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE INPUT
@@ -325,6 +380,22 @@ export interface SwordGateOutput {
 
   /** Whether to suppress normal model generation */
   readonly suppressModelGeneration?: boolean;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // View Mode (Phase 14B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** View target when in view mode */
+  readonly viewTarget?: ViewTarget;
+
+  /** Formatted view response message */
+  readonly viewMessage?: string;
+
+  /** Whether view found content */
+  readonly viewHasContent?: boolean;
+
+  /** Suggested actions after viewing */
+  readonly viewSuggestedActions?: readonly string[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -532,6 +603,19 @@ export interface SwordGateConfig {
 
   /** Explore state TTL in seconds (default: 7200 = 2 hours) */
   readonly exploreTtlSeconds: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // View configuration (Phase 14B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Default number of upcoming days to show (default: 7) */
+  readonly viewDefaultUpcomingDays: number;
+
+  /** Maximum goals to return in list (default: 20) */
+  readonly viewMaxGoalsToList: number;
+
+  /** Whether to include progress in goal list (default: true) */
+  readonly viewIncludeProgressInList: boolean;
 }
 
 /**
@@ -554,6 +638,10 @@ export const DEFAULT_SWORD_GATE_CONFIG: SwordGateConfig = {
   maxExploreTurns: 12,
   exploreClarityThreshold: 0.8,
   exploreTtlSeconds: 2 * 60 * 60, // 2 hours
+  // Phase 14B: View config
+  viewDefaultUpcomingDays: 7,
+  viewMaxGoalsToList: 20,
+  viewIncludeProgressInList: true,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════

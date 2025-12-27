@@ -4,16 +4,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Detects the appropriate SwordGate mode based on:
-//   1. ★ ACTIVE SESSION — If sword session active, route ALL messages to sword
-//   2. Exit/Cancel commands — End sword session
-//   3. Skip commands — Skip current step
-//   4. Active explore state (continue explore flow)
-//   5. Active refinement state (continue refine/suggest flow)
-//   6. Confirmation patterns (proceed to create)
-//   7. Modification requests (modify existing goal)
-//   8. Clear goal statement (skip explore → refine)
-//   9. Goal creation intent (start explore for vague goals)
-//   10. LLM classification for ambiguous cases
+//   1. Active explore state (continue explore flow)
+//   2. Active refinement state (continue refine/suggest flow)
+//   3. Confirmation patterns (proceed to create)
+//   4. Modification requests (modify existing goal)
+//   5. Clear goal statement (skip explore → refine)
+//   6. Goal creation intent (start explore for vague goals)
+//   7. LLM classification for ambiguous cases
 //
 // Implements fail-open: defaults to 'capture' when uncertain.
 //
@@ -28,7 +25,10 @@ import type {
   SwordGateInput,
   SwordRefinementState,
   SwordGateConfig,
+  ViewTarget,
+  ViewRequest,
 } from './types.js';
+import { isViewTarget } from './types.js';
 
 // Phase 14A: Import ExploreState
 import type { ExploreState } from './explore/types.js';
@@ -48,7 +48,7 @@ export interface ModeDetectionResult {
   readonly confidence: number;
 
   /** How the mode was detected */
-  readonly detectionMethod: 'active_session' | 'exit_command' | 'skip_command' | 'explore_state' | 'refinement_state' | 'confirmation' | 'modification' | 'keyword' | 'llm' | 'default';
+  readonly detectionMethod: 'explore_state' | 'refinement_state' | 'confirmation' | 'modification' | 'keyword' | 'llm' | 'default';
 
   /** Reasoning for the detection */
   readonly reasoning: string;
@@ -60,7 +60,7 @@ export interface ModeDetectionResult {
   readonly isContinuation: boolean;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Session control flags
+  // NEW: Explore bypass flags (Phase 14A)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Whether to bypass explore phase */
@@ -69,11 +69,15 @@ export interface ModeDetectionResult {
   /** Reason for bypassing explore */
   readonly bypassReason?: 'clear_goal' | 'user_skip' | 'disabled';
 
-  /** ★ NEW: Whether user wants to exit sword mode entirely */
-  readonly exitSession?: boolean;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // View mode fields (Phase 14B)
+  // ─────────────────────────────────────────────────────────────────────────────
 
-  /** ★ NEW: Whether user wants to skip current step */
-  readonly skipStep?: boolean;
+  /** View target when mode is 'view' */
+  readonly viewTarget?: ViewTarget;
+
+  /** Parsed view request details */
+  readonly viewRequest?: ViewRequest;
 }
 
 /**
@@ -91,37 +95,6 @@ interface LlmModeClassification {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PATTERNS
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * ★ NEW: Exit/cancel patterns — user wants to leave sword mode entirely.
- */
-const EXIT_PATTERNS: RegExp[] = [
-  /^(exit|quit|cancel|stop|nevermind|never mind|forget it|abort)\.?$/i,
-  /\b(exit|quit|cancel|stop|abort)\s+(this|the|goal|plan|learning|sword)\b/i,
-  /\b(don'?t|do not)\s+(want|need)\s+(this|to learn|a plan)\b/i,
-  /\b(i changed my mind|forget about it|let'?s stop)\b/i,
-];
-
-/**
- * ★ NEW: Skip patterns — user wants to skip current step.
- */
-const SKIP_PATTERNS: RegExp[] = [
-  /^(skip|next|continue|proceed)\.?$/i,
-  /\b(skip)\s+(this|the|these|exploration|questions?|step)\b/i,
-  /\b(just|let'?s)\s+(start|begin|create|make|go|proceed)\b/i,
-  /\b(skip to|jump to|go to|move on to)\s+(the\s+)?(plan|creation|next|end|lesson|generating)\b/i,
-  /\b(i'?m ready|ready to start|ready to go)\b/i,
-  /\b(don'?t need|skip)\s+(to\s+)?(ask|explore|talk|discuss)\b/i,
-  /\b(get straight to|get right to)\s+(it|the point|the plan)\b/i,
-  // ★ NEW: "can we create", "lets create the plan/lesson"
-  /\b(can we|let'?s|let us)\s+(create|make|build|generate)\s+(the\s+)?(plan|lesson)/i,
-  // ★ NEW: "move on" without specifying destination
-  /\b(move on|moving on|let'?s move|can we move)\b/i,
-  // ★ NEW: "create the lesson plan" / "lesson generation"
-  /\b(create|start|begin|make)\s+(the\s+)?(lesson\s*)?(plan|generation)\b/i,
-  // ★ NEW: Direct requests to proceed
-  /\b(enough (questions|talking|exploring)|let'?s (just )?(do|get) (this|it))\b/i,
-];
 
 /**
  * Confirmation patterns — user wants to proceed with the plan.
@@ -172,6 +145,63 @@ const EXISTING_GOAL_PATTERNS: RegExp[] = [
   /\b(my (goal|plan|learning plan)|the (goal|plan))\b/i,
   /\b(pause|resume|abandon|delete|cancel) (my|the) (goal|plan)\b/i,
   /\b(update|change|modify) (my|the) (existing|current) (goal|plan)\b/i,
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VIEW MODE PATTERNS (Phase 14B)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Patterns for viewing today's lesson.
+ */
+const VIEW_TODAY_PATTERNS: RegExp[] = [
+  /\b(what'?s|show|get|see)\s+(my\s+)?(today'?s?\s*)?(lesson|task|spark|learning|step)\b/i,
+  /\b(today'?s\s+lesson|what do i (learn|do|study) today)\b/i,
+  /\b(continue|resume|start)\s+(my\s+)?(learning|lesson|study|studying)\b/i,
+  /\bwhat'?s\s+(up\s+)?(for\s+)?today\b/i,
+  /\bmy\s+lesson\s+today\b/i,
+  /^today'?s?\s*(lesson|spark|step)?\.?$/i,
+];
+
+/**
+ * Patterns for viewing all goals.
+ * Must include explicit view verbs to avoid matching modify phrases like "pause my goal"
+ */
+const VIEW_GOALS_PATTERNS: RegExp[] = [
+  /\b(show|list|see|view|what are)\s+(my\s+|all\s+)?(my\s+)?(goals?|plans?|learning\s+goals?)\b/i,
+  /\bwhat\s+(goals?|plans?)\s+do\s+i\s+have\b/i,
+  /^(goals?|my goals?)\.?$/i,
+  /^(list|show)\s+goals?\.?$/i,
+];
+
+/**
+ * Patterns for viewing progress.
+ */
+const VIEW_PROGRESS_PATTERNS: RegExp[] = [
+  /\b(show|see|view|what'?s|check)\s+(my\s+)?(progress|status|stats)\b/i,
+  /\bhow\s+(am\s+i\s+doing|far\s+along|much\s+progress)\b/i,
+  /\bmy\s+progress\b/i,
+  /^progress\.?$/i,
+];
+
+/**
+ * Patterns for viewing full plan.
+ * Must include explicit view verbs to avoid matching modify phrases like "update my learning plan"
+ */
+const VIEW_PLAN_PATTERNS: RegExp[] = [
+  /\b(show|see|view)\s+(my\s+|the\s+)?(full\s+|complete\s+|entire\s+)?(plan|curriculum|schedule|syllabus)\b/i,
+  /\bwhat'?s\s+(in|on)\s+(my\s+)?(plan|curriculum)\b/i,
+  /^(plan|my plan|full plan|show plan|view plan)\.?$/i,
+];
+
+/**
+ * Patterns for viewing upcoming lessons.
+ */
+const VIEW_UPCOMING_PATTERNS: RegExp[] = [
+  /\b(show|see|view|what'?s)\s+(the\s+)?(upcoming|next|coming)\s*(lessons?|steps?|days?)?\b/i,
+  /\bwhat'?s\s+(coming\s+)?next\b/i,
+  /\bnext\s+(few\s+)?(lessons?|days?|steps?)\b/i,
+  /\bupcoming\s+(lessons?|schedule)?\b/i,
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -260,327 +290,312 @@ EXAMPLES:
 ═══════════════════════════════════════════════════════════════════════════════
 
 User: "Yes, create it"
-{"mode":"create","confidence":0.95,"reasoning":"Clear confirmation to create","isConfirmation":true,"isModification":false}
+{"mode":"create","confidence":0.98,"reasoning":"Clear confirmation to proceed","isConfirmation":true,"isModification":false}
 
-User: "make it shorter"
-{"mode":"modify","confidence":0.9,"reasoning":"Request to modify duration","isConfirmation":false,"isModification":true}
+User: "I want to learn TypeScript for React development"
+{"mode":"capture","confidence":0.95,"reasoning":"Clear, specific learning goal","isConfirmation":false,"isModification":false}
 
-User: "30 minutes a day"
-{"mode":"refine","confidence":0.85,"reasoning":"Answering time commitment question","isConfirmation":false,"isModification":false}
+User: "I want to get into programming somehow"
+{"mode":"explore","confidence":0.88,"reasoning":"Vague goal, needs crystallization","isConfirmation":false,"isModification":false}
 
-User: "I want to learn React to build a dashboard"
-{"mode":"capture","confidence":0.9,"reasoning":"Clear goal with technology and purpose","isConfirmation":false,"isModification":false}
+User: "About 30 minutes a day"
+{"mode":"refine","confidence":0.90,"reasoning":"Answering time commitment question","isConfirmation":false,"isModification":false}
 
-User: "something with programming maybe"
-{"mode":"explore","confidence":0.85,"reasoning":"Vague interest needing exploration","isConfirmation":false,"isModification":false}`;
+User: "Make it 4 weeks instead"
+{"mode":"modify","confidence":0.92,"reasoning":"Requesting change to duration","isConfirmation":false,"isModification":true}
+
+User: "Pause my current goal"
+{"mode":"modify","confidence":0.88,"reasoning":"Modifying existing goal","isConfirmation":false,"isModification":true,"targetGoalReference":"current goal"}
+
+═══════════════════════════════════════════════════════════════════════════════
+Now classify the following. Return only valid JSON:`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODE DETECTOR CLASS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Detects the appropriate SwordGate mode.
+ * Detects the appropriate SwordGate mode for a given input.
  */
 export class ModeDetector {
+  private openai: OpenAI | null = null;
   private readonly config: SwordGateConfig;
-  private readonly openai?: OpenAI;
 
   constructor(config: SwordGateConfig, openaiApiKey?: string) {
     this.config = config;
-    if (openaiApiKey) {
-      this.openai = new OpenAI({ apiKey: openaiApiKey });
+    const key = openaiApiKey ?? process.env.OPENAI_API_KEY;
+    if (key && config.useLlmModeDetection) {
+      this.openai = new OpenAI({ apiKey: key });
     }
   }
 
   /**
    * Detect the appropriate mode for the input.
+   *
+   * Priority order (Phase 14A updated):
+   * 0. Check for view requests → view (Phase 14B)
+   * 1. Check active explore state → continue or transition
+   * 2. Check active refinement state → continue or transition
+   * 3. Check for confirmation patterns → create
+   * 4. Check for modification patterns → modify
+   * 5. Check for clear goal statement → refine (skip explore)
+   * 6. Check for goal creation intent → explore
+   * 7. Use LLM classification
+   * 8. Default to capture
    */
   async detect(
     input: SwordGateInput,
     refinementState: SwordRefinementState | null,
-    exploreState: ExploreState | null
+    exploreState?: ExploreState | null
   ): Promise<ModeDetectionResult> {
     const message = input.message.trim();
-    const hasActiveSession = this.hasActiveSession(exploreState, refinementState);
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ★ PRIORITY 0: Exit commands — always check first
-    // ═══════════════════════════════════════════════════════════════════════════
-    if (this.isExitCommand(message)) {
-      console.log('[MODE_DETECTOR] Exit command detected');
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 0: View requests (Phase 14B)
+    // View mode takes precedence to allow users to check content anytime.
+    // ─────────────────────────────────────────────────────────────────────────
+    const viewResult = this.detectViewIntent(message);
+    if (viewResult) {
       return {
-        mode: 'capture', // Return to initial state
-        confidence: 1.0,
-        detectionMethod: 'exit_command',
-        reasoning: 'User requested to exit sword mode',
+        mode: 'view',
+        confidence: viewResult.confidence,
+        detectionMethod: 'keyword',
+        reasoning: viewResult.reasoning,
         isContinuation: false,
-        exitSession: true,
+        viewTarget: viewResult.target,
+        viewRequest: {
+          target: viewResult.target,
+        },
       };
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ★ PRIORITY 1: Skip commands — check before other processing
-    // ═══════════════════════════════════════════════════════════════════════════
-    if (this.isSkipCommand(message)) {
-      console.log('[MODE_DETECTOR] Skip command detected');
-      
-      // Determine what to skip to based on current state
-      if (exploreState && !this.isExploreTerminal(exploreState)) {
-        // Skip explore → go to refine
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 1: Active explore state (Phase 14A)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (exploreState && !this.isExploreTerminal(exploreState)) {
+      // Check if user wants to skip exploration
+      if (this.isSkipExploreRequest(message)) {
         return {
           mode: 'refine',
-          confidence: 1.0,
-          detectionMethod: 'skip_command',
-          reasoning: 'User skipped exploration phase',
-          isContinuation: true,
-          skipStep: true,
+          confidence: 0.90,
+          detectionMethod: 'explore_state',
+          reasoning: 'User requested to skip exploration',
+          isContinuation: false,
           bypassExplore: true,
           bypassReason: 'user_skip',
         };
-      } else if (refinementState && refinementState.stage !== 'complete') {
-        // Skip refinement → go to suggest/create with defaults
+      }
+
+      // Check if user is confirming a proposed goal
+      if (this.isExploreConfirmation(message) && exploreState.stage === 'proposing') {
         return {
-          mode: 'suggest',
-          confidence: 1.0,
-          detectionMethod: 'skip_command',
-          reasoning: 'User skipped refinement - proceeding with defaults',
-          isContinuation: true,
-          skipStep: true,
+          mode: 'refine',
+          confidence: 0.92,
+          detectionMethod: 'explore_state',
+          reasoning: 'User confirmed crystallized goal, transitioning to refinement',
+          isContinuation: false,
         };
       }
-      
-      // No active step to skip, treat as normal
+
+      // Continue exploration
+      return {
+        mode: 'explore',
+        confidence: 0.95,
+        detectionMethod: 'explore_state',
+        reasoning: 'Active exploration session in progress',
+        isContinuation: true,
+      };
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ★ PRIORITY 2: Active session routing — ALL messages go to sword
-    // ═══════════════════════════════════════════════════════════════════════════
-    if (hasActiveSession) {
-      console.log('[MODE_DETECTOR] Active sword session detected, routing to sword');
-      
-      // Check what state we're in and route appropriately
-      if (exploreState && !this.isExploreTerminal(exploreState)) {
-        return this.detectWithinExplore(message, exploreState);
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 2: Active refinement in confirming stage
+    // ─────────────────────────────────────────────────────────────────────────
+    if (refinementState?.stage === 'confirming') {
+      // Check if user is confirming the proposed plan
+      if (this.isConfirmation(message)) {
+        return {
+          mode: 'create',
+          confidence: 0.95,
+          detectionMethod: 'confirmation',
+          reasoning: 'User confirmed proposed plan',
+          isContinuation: true,
+        };
       }
-      
-      if (refinementState) {
-        return this.detectWithinRefinement(message, refinementState);
+
+      // Check if user wants modifications
+      if (this.isModificationRequest(message)) {
+        return {
+          mode: 'modify',
+          confidence: 0.88,
+          detectionMethod: 'modification',
+          reasoning: 'User requested modifications to proposed plan',
+          isContinuation: true,
+        };
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PRIORITY 3: Pattern-based detection for new sessions
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    // Check for existing goal modification patterns (no active session needed)
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 3: Existing goal modification
+    // ─────────────────────────────────────────────────────────────────────────
     if (this.isExistingGoalModification(message)) {
       return {
         mode: 'modify',
         confidence: 0.85,
-        detectionMethod: 'keyword',
-        reasoning: 'Existing goal modification pattern detected',
+        detectionMethod: 'modification',
+        reasoning: 'User wants to modify an existing goal',
         isContinuation: false,
       };
     }
 
-    // Check for goal creation intent
-    if (this.hasGoalCreationIntent(message)) {
-      // Check if it's a clear goal or needs exploration
-      if (this.isClearGoalStatement(message)) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 4: Active refinement (answering questions)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (refinementState?.stage === 'clarifying') {
+      // Use keyword heuristics for short responses
+      if (message.length < 100) {
+        const keywordResult = this.classifyWithKeywords(message, refinementState);
+        if (keywordResult.confidence >= 0.7) {
+          return keywordResult;
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 5: Clear goal statement → skip explore (Phase 14A)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (this.config.enableExplore && this.isClearGoalStatement(message)) {
+      return {
+        mode: 'capture',
+        confidence: 0.88,
+        detectionMethod: 'keyword',
+        reasoning: 'Clear, specific goal detected - skipping exploration',
+        isContinuation: false,
+        bypassExplore: true,
+        bypassReason: 'clear_goal',
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 6: Goal creation intent → explore (Phase 14A)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (this.config.enableExplore && this.isGoalCreationIntent(message, input.intent)) {
+      // Check if user wants to skip exploration
+      if (this.isSkipExploreRequest(message)) {
         return {
           mode: 'capture',
           confidence: 0.85,
           detectionMethod: 'keyword',
-          reasoning: 'Clear goal statement detected - bypassing explore',
+          reasoning: 'Goal creation with skip exploration request',
           isContinuation: false,
           bypassExplore: true,
-          bypassReason: 'clear_goal',
+          bypassReason: 'user_skip',
         };
       }
 
-      // Vague goal - needs exploration
-      if (this.config.enableExplore) {
-        return {
-          mode: 'explore',
-          confidence: 0.8,
-          detectionMethod: 'keyword',
-          reasoning: 'Goal creation intent detected - starting exploration',
-          isContinuation: false,
-        };
+      // Route to explore for vague goals
+      return {
+        mode: 'explore',
+        confidence: 0.82,
+        detectionMethod: 'keyword',
+        reasoning: 'Goal creation intent - starting exploration',
+        isContinuation: false,
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 7: Goal creation intent (explore disabled)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (!this.config.enableExplore && this.isGoalCreationIntent(message, input.intent)) {
+      return {
+        mode: 'capture',
+        confidence: 0.85,
+        detectionMethod: 'keyword',
+        reasoning: 'Learning goal creation intent detected',
+        isContinuation: false,
+        bypassExplore: true,
+        bypassReason: 'disabled',
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 8: LLM classification (if enabled)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (this.config.useLlmModeDetection && this.openai) {
+      const llmResult = await this.classifyWithLlm(message, refinementState, exploreState);
+      if (llmResult && llmResult.confidence >= 0.7) {
+        return llmResult;
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PRIORITY 4: LLM fallback for ambiguous cases
-    // ═══════════════════════════════════════════════════════════════════════════
-    const llmResult = await this.classifyWithLlm(message, refinementState, exploreState);
-    if (llmResult && llmResult.confidence > 0.6) {
-      return llmResult;
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 9: Keyword fallback
+    // ─────────────────────────────────────────────────────────────────────────
+    const keywordResult = this.classifyWithKeywords(message, refinementState);
+    if (keywordResult.confidence >= 0.5) {
+      return keywordResult;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // DEFAULT: Fall back to keyword classification
-    // ═══════════════════════════════════════════════════════════════════════════
-    return this.classifyWithKeywords(message, refinementState);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ★ NEW: Session and command detection
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Check if there's an active sword session.
-   */
-  private hasActiveSession(
-    exploreState: ExploreState | null,
-    refinementState: SwordRefinementState | null
-  ): boolean {
-    // Check for active explore session
-    if (exploreState && !this.isExploreTerminal(exploreState)) {
-      return true;
-    }
-
-    // Check for active refinement session
-    if (refinementState && refinementState.stage !== 'complete') {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if message is an exit command.
-   */
-  private isExitCommand(message: string): boolean {
-    return EXIT_PATTERNS.some((pattern) => pattern.test(message));
-  }
-
-  /**
-   * Check if message is a skip command.
-   */
-  private isSkipCommand(message: string): boolean {
-    return SKIP_PATTERNS.some((pattern) => pattern.test(message));
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // EXPLORE STATE DETECTION
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Detect mode when in active explore session.
-   */
-  private detectWithinExplore(
-    message: string,
-    exploreState: ExploreState
-  ): ModeDetectionResult {
-    // Check for confirmation of crystallized goal
-    if (exploreState.crystallizedGoal && this.isExploreConfirmation(message)) {
-      return {
-        mode: 'refine',
-        confidence: 0.95,
-        detectionMethod: 'explore_state',
-        reasoning: 'User confirmed crystallized goal - transitioning to refine',
-        isContinuation: true,
-      };
-    }
-
-    // Continue exploration
+    // ─────────────────────────────────────────────────────────────────────────
+    // Default: Capture mode
+    // ─────────────────────────────────────────────────────────────────────────
     return {
-      mode: 'explore',
-      confidence: 0.9,
-      detectionMethod: 'active_session',
-      reasoning: 'Active explore session - continuing dialogue',
-      isContinuation: true,
+      mode: 'capture',
+      confidence: 0.4,
+      detectionMethod: 'default',
+      reasoning: 'No strong signals detected, defaulting to capture',
+      isContinuation: false,
     };
   }
 
-  /**
-   * Detect mode when in active refinement session.
-   */
-  private detectWithinRefinement(
-    message: string,
-    refinementState: SwordRefinementState
-  ): ModeDetectionResult {
-    // Check if we're in a stage where confirmation/modification is expected
-    const isConfirmingStage = refinementState.stage === 'confirming' || 
-                              refinementState.lastProposedPlan !== undefined;
-
-    // Check for confirmation of proposal
-    if (isConfirmingStage && this.isConfirmation(message)) {
-      return {
-        mode: 'create',
-        confidence: 0.95,
-        detectionMethod: 'confirmation',
-        reasoning: 'User confirmed proposed plan',
-        isContinuation: true,
-      };
-    }
-
-    // Check for modification request
-    if (isConfirmingStage && this.isModificationRequest(message)) {
-      return {
-        mode: 'modify',
-        confidence: 0.9,
-        detectionMethod: 'modification',
-        reasoning: 'User wants to modify the proposal',
-        isContinuation: true,
-      };
-    }
-
-    // Continue refinement
-    return {
-      mode: 'refine',
-      confidence: 0.85,
-      detectionMethod: 'active_session',
-      reasoning: 'Active refinement session - processing answer',
-      isContinuation: true,
-    };
-  }
-
-  /**
-   * Check if explore state is terminal.
-   */
-  private isExploreTerminal(state: ExploreState): boolean {
-    return state.stage === 'confirmed' || state.stage === 'skipped';
-  }
-
   // ─────────────────────────────────────────────────────────────────────────────
-  // PATTERN MATCHING
+  // PATTERN MATCHERS
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Check for goal creation intent.
-   */
-  private hasGoalCreationIntent(message: string): boolean {
-    return GOAL_CREATION_PATTERNS.some((pattern) => pattern.test(message));
-  }
-
-  /**
-   * Check if this is a clear, specific goal statement.
-   */
-  private isClearGoalStatement(message: string): boolean {
-    return CLEAR_GOAL_PATTERNS.some((pattern) => pattern.test(message));
-  }
-
-  /**
-   * Check if user is confirming.
+   * Check if message is a confirmation.
    */
   private isConfirmation(message: string): boolean {
     return CONFIRMATION_PATTERNS.some((pattern) => pattern.test(message));
   }
 
   /**
-   * Check if user wants modifications.
+   * Check if message is requesting modifications.
    */
   private isModificationRequest(message: string): boolean {
     return MODIFICATION_PATTERNS.some((pattern) => pattern.test(message));
   }
 
   /**
-   * Check if user is confirming during exploration.
+   * Check if message is about modifying an existing goal.
    */
-  private isExploreConfirmation(message: string): boolean {
-    return EXPLORE_CONFIRMATION_PATTERNS.some((pattern) => pattern.test(message));
+  private isExistingGoalModification(message: string): boolean {
+    return EXISTING_GOAL_PATTERNS.some((pattern) => pattern.test(message));
+  }
+
+  /**
+   * Check if message indicates goal creation intent.
+   */
+  private isGoalCreationIntent(message: string, intent?: Intent): boolean {
+    // Check intent type from IntentGate
+    if (intent?.type === 'action' || intent?.type === 'planning') {
+      if (GOAL_CREATION_PATTERNS.some((pattern) => pattern.test(message))) {
+        return true;
+      }
+    }
+
+    // Direct pattern match
+    return GOAL_CREATION_PATTERNS.some((pattern) => pattern.test(message));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // NEW: EXPLORE-RELATED HELPERS (Phase 14A)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Check if explore state is terminal (no longer active).
+   */
+  private isExploreTerminal(state: ExploreState): boolean {
+    return ['confirmed', 'skipped', 'expired'].includes(state.stage);
   }
 
   /**
@@ -591,10 +606,80 @@ export class ModeDetector {
   }
 
   /**
-   * Check if user wants to modify an existing goal.
+   * Check if user is confirming during exploration.
    */
-  private isExistingGoalModification(message: string): boolean {
-    return EXISTING_GOAL_PATTERNS.some((pattern) => pattern.test(message));
+  private isExploreConfirmation(message: string): boolean {
+    return EXPLORE_CONFIRMATION_PATTERNS.some((pattern) => pattern.test(message));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // VIEW MODE DETECTION (Phase 14B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Detect if message is a view request and determine the target.
+   * Returns null if not a view request.
+   */
+  private detectViewIntent(message: string): {
+    target: ViewTarget;
+    confidence: number;
+    reasoning: string;
+  } | null {
+    // Check patterns in priority order (most specific first)
+
+    // Progress (most specific)
+    if (VIEW_PROGRESS_PATTERNS.some((p) => p.test(message))) {
+      return {
+        target: 'progress',
+        confidence: 0.90,
+        reasoning: 'Progress/status view request detected',
+      };
+    }
+
+    // Plan (specific)
+    if (VIEW_PLAN_PATTERNS.some((p) => p.test(message))) {
+      return {
+        target: 'plan',
+        confidence: 0.88,
+        reasoning: 'Full plan view request detected',
+      };
+    }
+
+    // Upcoming (specific)
+    if (VIEW_UPCOMING_PATTERNS.some((p) => p.test(message))) {
+      return {
+        target: 'upcoming',
+        confidence: 0.85,
+        reasoning: 'Upcoming lessons view request detected',
+      };
+    }
+
+    // Goals (general list)
+    if (VIEW_GOALS_PATTERNS.some((p) => p.test(message))) {
+      return {
+        target: 'goals',
+        confidence: 0.88,
+        reasoning: 'Goals list view request detected',
+      };
+    }
+
+    // Today (default view, checked last)
+    if (VIEW_TODAY_PATTERNS.some((p) => p.test(message))) {
+      return {
+        target: 'today',
+        confidence: 0.92,
+        reasoning: "Today's lesson view request detected",
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if message contains a clear, specific goal statement.
+   */
+  private isClearGoalStatement(message: string): boolean {
+    return CLEAR_GOAL_PATTERNS.some((pattern) => pattern.test(message));
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -770,7 +855,7 @@ export class ModeDetector {
       const parsed = JSON.parse(jsonStr.trim());
 
       // Validate mode (updated for Phase 14A)
-      const validModes: SwordGateMode[] = ['capture', 'explore', 'refine', 'suggest', 'create', 'modify'];
+      const validModes: SwordGateMode[] = ['capture', 'explore', 'refine', 'suggest', 'create', 'modify', 'view'];
       const mode = validModes.includes(parsed.mode) ? parsed.mode : 'capture';
 
       return {

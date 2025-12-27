@@ -55,6 +55,8 @@ import type {
   GoalRateLimitInfo,
   CreatedGoalResult,
   ExploreContext,
+  ViewTarget,
+  ViewRequest,
 } from './types.js';
 import { DEFAULT_SWORD_GATE_CONFIG, hasRequiredFields, getMissingRequiredFields } from './types.js';
 
@@ -75,6 +77,9 @@ import { buildExploreContext } from './explore/types.js';
 import { ExploreStore, createExploreStore } from './explore/explore-store.js';
 import { ExploreFlow, createExploreFlow } from './explore/explore-flow.js';
 import { ClarityDetector, createClarityDetector } from './explore/clarity-detector.js';
+
+// Phase 14B: Import view components
+import { ViewFlow, createViewFlow } from './view-flow.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // RATE LIMITER INTERFACE
@@ -122,6 +127,9 @@ export class SwordGate {
   private readonly exploreFlow: ExploreFlow;
   private readonly clarityDetector: ClarityDetector;
 
+  // Phase 14B: View component
+  private readonly viewFlow: ViewFlow | null = null;
+
   constructor(
     baseRefinementStore: IRefinementStore,
     config: Partial<SwordGateConfig> = {},
@@ -159,6 +167,15 @@ export class SwordGate {
 
     this.sparkEngine = options.sparkEngine;
     this.rateLimiter = options.rateLimiter;
+
+    // Phase 14B: Initialize ViewFlow if sparkEngine available
+    if (this.sparkEngine) {
+      this.viewFlow = createViewFlow(this.sparkEngine, {
+        defaultUpcomingDays: this.config.viewDefaultUpcomingDays,
+        maxGoalsToList: this.config.viewMaxGoalsToList,
+        includeProgressInList: this.config.viewIncludeProgressInList,
+      });
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -198,29 +215,6 @@ export class SwordGate {
       const modeResult = await this.modeDetector.detect(input, refinementState, exploreState);
       console.log(`[SWORD_GATE] Mode detected: ${modeResult.mode} (${modeResult.detectionMethod})`);
 
-      // ★ Handle exit command - clear all state and return to normal
-      if (modeResult.exitSession) {
-        return {
-          gateId: this.gateId,
-          status: 'pass',
-          output: await this.handleExitSession(input),
-          action: 'continue',
-          executionTimeMs: Date.now() - startTime,
-        };
-      }
-
-      // ★ Handle skip command - advance to next step or create with defaults
-      if (modeResult.skipStep) {
-        const output = await this.handleSkipStep(input, refinementState, exploreState, modeResult);
-        return {
-          gateId: this.gateId,
-          status: 'pass',
-          output,
-          action: this.determineAction(output),
-          executionTimeMs: Date.now() - startTime,
-        };
-      }
-
       // Execute mode-specific handler
       const output = await this.executeMode(input, refinementState, exploreState, modeResult);
 
@@ -242,132 +236,6 @@ export class SwordGate {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // ★ SESSION CONTROL HANDLERS
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Handle exit command - clear all sword session state.
-   */
-  private async handleExitSession(input: SwordGateInput): Promise<SwordGateOutput> {
-    console.log(`[SWORD_GATE] Exiting session for user ${input.userId}`);
-
-    // Clear explore state
-    if (this.config.enableExplore) {
-      await this.exploreStore.delete(input.userId);
-    }
-
-    // Clear refinement state
-    await this.refinementStore.delete(input.userId);
-
-    return {
-      mode: 'capture',
-      responseMessage: 'No problem! Let me know if you want to create a learning plan later.',
-      suppressModelGeneration: false, // Allow normal conversation to continue
-    };
-  }
-
-  /**
-   * Handle skip command - advance to next step or create with defaults.
-   */
-  private async handleSkipStep(
-    input: SwordGateInput,
-    refinementState: SwordRefinementState | null,
-    exploreState: ExploreState | null,
-    modeResult: { mode: SwordGateMode; bypassExplore?: boolean }
-  ): Promise<SwordGateOutput> {
-    console.log(`[SWORD_GATE] Skipping step for user ${input.userId}`);
-
-    // If in explore phase, skip to refine
-    if (exploreState && !this.isExploreTerminal(exploreState)) {
-      console.log('[SWORD_GATE] Skipping explore → refine');
-      
-      // Mark explore as skipped
-      await this.exploreStore.skip(input.userId);
-      
-      // ★ SYNTHESIZE GOAL from explore context (not just initial statement)
-      // Priority: crystallizedGoal > candidateGoals > interests > initialStatement
-      const goalStatement = this.synthesizeGoalFromExplore(exploreState);
-      console.log(`[SWORD_GATE] Synthesized goal: "${goalStatement}"`);
-      
-      // Sanitize and start refinement
-      const sanitizeResult = this.sanitizer.sanitize(goalStatement);
-      if (!sanitizeResult.valid) {
-        return {
-          mode: 'capture',
-          responseMessage: 'I couldn\'t understand that goal. What would you like to learn?',
-          suppressModelGeneration: true,
-        };
-      }
-      
-      // Initiate refinement flow
-      const newState = this.refinementFlow.initiate(
-        input.userId,
-        sanitizeResult.sanitized!,
-        input.userPreferences
-      );
-      
-      // Save refinement state
-      const saveResult = await this.refinementStore.save(newState);
-      if (!saveResult.ok) {
-        return {
-          mode: 'capture',
-          responseMessage: 'Failed to start refinement. Please try again.',
-          suppressModelGeneration: true,
-        };
-      }
-      
-      // Get first question
-      const nextQuestion = this.refinementFlow.getNextQuestion(newState);
-      
-      return {
-        mode: 'refine',
-        nextQuestion: nextQuestion ?? undefined,
-        responseMessage: `Got it! Let me help you create a plan for "${sanitizeResult.topic}". ${nextQuestion || 'What is your current skill level?'}`,
-        suppressModelGeneration: true,
-      };
-    }
-
-    // If in refine phase, skip to suggest with defaults
-    if (refinementState && refinementState.stage !== 'complete') {
-      console.log('[SWORD_GATE] Skipping refine → suggest');
-      
-      // Fill in defaults for missing fields
-      const filledInputs = this.fillDefaults(refinementState.inputs);
-      
-      // Generate proposal with defaults
-      const proposalResult = await this.planGenerator.generate(filledInputs);
-      
-      if (!proposalResult.ok) {
-        return {
-          mode: 'capture',
-          responseMessage: 'I had trouble generating a plan. Let me try a simpler approach.',
-          suppressModelGeneration: true,
-        };
-      }
-      
-      const proposal = proposalResult.value;
-      
-      // Store proposal and update state to confirming
-      await this.refinementStore.startConfirming(input.userId, proposal);
-      
-      return {
-        mode: 'suggest',
-        proposedPlan: proposal,
-        confirmationRequired: true,
-        responseMessage: this.buildProposalResponse(proposal),
-        suppressModelGeneration: true,
-      };
-    }
-
-    // No active step to skip
-    return {
-      mode: 'capture',
-      responseMessage: 'What would you like to learn?',
-      suppressModelGeneration: true,
-    };
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // MODE HANDLERS
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -378,13 +246,7 @@ export class SwordGate {
     input: SwordGateInput,
     refinementState: SwordRefinementState | null,
     exploreState: ExploreState | null,
-    modeResult: { 
-      mode: SwordGateMode; 
-      bypassExplore?: boolean; 
-      bypassReason?: string;
-      exitSession?: boolean;
-      skipStep?: boolean;
-    }
+    modeResult: { mode: SwordGateMode; bypassExplore?: boolean; bypassReason?: string }
   ): Promise<SwordGateOutput> {
     const { mode, bypassExplore, bypassReason } = modeResult;
 
@@ -414,6 +276,10 @@ export class SwordGate {
 
       case 'modify':
         return this.handleModify(input, refinementState);
+
+      // Phase 14B: View mode
+      case 'view':
+        return this.handleView(input, modeResult.viewTarget, modeResult.viewRequest);
 
       default:
         return {
@@ -470,25 +336,22 @@ export class SwordGate {
 
     const { state, response } = result.value;
 
-    // ★ FIX: Set userId before saving (exploreFlow returns empty userId)
-    const stateWithUser: ExploreState = { 
-      ...state, 
+    // ★ FIX: Set userId on state before saving (ExploreFlow returns empty userId)
+    const stateWithUserId: ExploreState = {
+      ...state,
       userId: input.userId,
-      initialStatement: input.message,  // Ensure initial statement is set
     };
 
     // Save explore state
-    const saveResult = await this.exploreStore.save(stateWithUser);
+    const saveResult = await this.exploreStore.save(stateWithUserId);
     if (!saveResult.ok) {
       console.error('[SWORD_GATE] Failed to save explore state:', saveResult.error);
-    } else {
-      console.log(`[SWORD_GATE] Explore state saved for user ${input.userId}`);
     }
 
     return {
       mode: 'explore',
       explorationInProgress: true,
-      clarityScore: state.clarityScore,
+      clarityScore: stateWithUserId.clarityScore,
       responseMessage: response,
       suppressModelGeneration: true,
     };
@@ -737,70 +600,53 @@ export class SwordGate {
     input: SwordGateInput,
     currentState: SwordRefinementState
   ): Promise<SwordGateOutput> {
-    try {
-      console.log(`[SWORD_GATE] handleRefine called, stage: ${currentState.stage}, message: "${input.message.substring(0, 50)}"`);
-      
-      // Check for expiration
-      if (this.refinementStore.isExpired(currentState)) {
-        console.log('[SWORD_GATE] Session expired');
-        await this.refinementStore.delete(input.userId);
-        return {
-          mode: 'capture',
-          responseMessage: 'Your session has expired. What would you like to learn?',
-          suppressModelGeneration: true,
-        };
-      }
-
-      // Check max turns
-      if (this.refinementStore.isMaxTurnsExceeded(currentState)) {
-        console.log('[SWORD_GATE] Max turns exceeded, forcing suggest');
-        // Force move to suggest with what we have
-        return this.handleSuggest(input, currentState);
-      }
-
-      // Process the response
-      console.log('[SWORD_GATE] Processing response...');
-      const updatedState = this.refinementFlow.processResponse(currentState, input.message);
-      console.log(`[SWORD_GATE] Updated inputs: userLevel=${updatedState.inputs.userLevel}, dailyTime=${updatedState.inputs.dailyTimeCommitment}, totalDuration=${updatedState.inputs.totalDuration}`);
-
-      // Save updated state
-      const saveResult = await this.refinementStore.save(updatedState);
-      if (!saveResult.ok) {
-        console.error('[SWORD_GATE] Failed to update refinement state:', saveResult.error);
-      }
-
-      // Check if refinement is complete
-      const isComplete = this.refinementFlow.isComplete(updatedState);
-      console.log(`[SWORD_GATE] isComplete: ${isComplete}`);
-      
-      if (isComplete) {
-        console.log('[SWORD_GATE] Refinement complete, moving to suggest');
-        // Move to suggest mode
-        return this.handleSuggest(input, updatedState);
-      }
-
-      // Get next question
-      const nextQuestion = this.refinementFlow.getNextQuestion(updatedState);
-      console.log(`[SWORD_GATE] Next question: ${nextQuestion ?? 'none'}`);
-
-      if (!nextQuestion) {
-        console.log('[SWORD_GATE] No more questions, moving to suggest');
-        // No more questions, move to suggest
-        return this.handleSuggest(input, updatedState);
-      }
-
+    // Check for expiration
+    if (this.refinementStore.isExpired(currentState)) {
+      await this.refinementStore.delete(input.userId);
       return {
-        mode: 'refine',
-        nextQuestion,
-        refinementProgress: this.refinementFlow.getProgressPercent(updatedState) / 100,
-        missingFields: this.refinementFlow.getMissingFields(updatedState),
-        responseMessage: nextQuestion,
+        mode: 'capture',
+        responseMessage: 'Your session has expired. What would you like to learn?',
         suppressModelGeneration: true,
       };
-    } catch (error) {
-      console.error('[SWORD_GATE] handleRefine error:', error);
-      throw error; // Re-throw to let pipeline handle it
     }
+
+    // Check max turns
+    if (this.refinementStore.isMaxTurnsExceeded(currentState)) {
+      // Force move to suggest with what we have
+      return this.handleSuggest(input, currentState);
+    }
+
+    // Process the response
+    const updatedState = this.refinementFlow.processResponse(currentState, input.message);
+
+    // Save updated state
+    const saveResult = await this.refinementStore.save(updatedState);
+    if (!saveResult.ok) {
+      console.error('[SWORD_GATE] Failed to update refinement state:', saveResult.error);
+    }
+
+    // Check if refinement is complete
+    if (this.refinementFlow.isComplete(updatedState)) {
+      // Move to suggest mode
+      return this.handleSuggest(input, updatedState);
+    }
+
+    // Get next question
+    const nextQuestion = this.refinementFlow.getNextQuestion(updatedState);
+
+    if (!nextQuestion) {
+      // No more questions, move to suggest
+      return this.handleSuggest(input, updatedState);
+    }
+
+    return {
+      mode: 'refine',
+      nextQuestion,
+      refinementProgress: this.refinementFlow.getProgressPercent(updatedState) / 100,
+      missingFields: this.refinementFlow.getMissingFields(updatedState),
+      responseMessage: nextQuestion,
+      suppressModelGeneration: true,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -814,51 +660,38 @@ export class SwordGate {
     input: SwordGateInput,
     currentState: SwordRefinementState
   ): Promise<SwordGateOutput> {
-    try {
-      console.log('[SWORD_GATE] handleSuggest called');
-      console.log(`[SWORD_GATE] Inputs: goal="${currentState.inputs.goalStatement}", level=${currentState.inputs.userLevel}, daily=${currentState.inputs.dailyTimeCommitment}, duration=${currentState.inputs.totalDuration}, days=${currentState.inputs.totalDays}`);
-      
-      // ★ ALWAYS fill defaults to ensure totalDays is set
-      // Bug: hasRequiredFields checks totalDuration but NOT totalDays
-      // But generate() requires both. fillDefaults ensures both are set.
-      const filledInputs = this.fillDefaults(currentState.inputs);
-      const updatedState = { ...currentState, inputs: filledInputs };
-      
-      console.log(`[SWORD_GATE] After fillDefaults: duration=${filledInputs.totalDuration}, days=${filledInputs.totalDays}`);
-      
-      // Save the updated state
+    // Ensure we have minimum required fields
+    if (!hasRequiredFields(currentState.inputs)) {
+      // Fill defaults for missing fields
+      const inputs = this.fillDefaults(currentState.inputs);
+      const updatedState = { ...currentState, inputs };
       await this.refinementStore.save(updatedState);
+    }
 
-      // Generate lesson plan proposal
-      console.log('[SWORD_GATE] Generating lesson plan...');
-      const planResult = await this.planGenerator.generate(filledInputs);
+    // Generate lesson plan proposal
+    const planResult = await this.planGenerator.generate(currentState.inputs);
 
-      if (!planResult.ok) {
-        console.error('[SWORD_GATE] Plan generation failed:', planResult.error);
-        return {
-          mode: 'suggest',
-          responseMessage: 'I couldn\'t generate a learning plan. Please try again with different details.',
-          suppressModelGeneration: true,
-        };
-      }
-
-      const proposal = planResult.value;
-      console.log(`[SWORD_GATE] Plan generated: "${proposal.title}" with ${proposal.quests.length} stages`);
-
-      // Update state to confirming with the proposal
-      await this.refinementStore.startConfirming(input.userId, proposal);
-
+    if (!planResult.ok) {
+      console.error('[SWORD_GATE] Plan generation failed:', planResult.error);
       return {
         mode: 'suggest',
-        proposedPlan: proposal,
-        confirmationRequired: true,
-        responseMessage: this.buildProposalResponse(proposal),
+        responseMessage: 'I couldn\'t generate a learning plan. Please try again with different details.',
         suppressModelGeneration: true,
       };
-    } catch (error) {
-      console.error('[SWORD_GATE] handleSuggest error:', error);
-      throw error; // Re-throw to let pipeline handle it
     }
+
+    const proposal = planResult.value;
+
+    // Update state to confirming with the proposal
+    await this.refinementStore.startConfirming(input.userId, proposal);
+
+    return {
+      mode: 'suggest',
+      proposedPlan: proposal,
+      confirmationRequired: true,
+      responseMessage: this.buildProposalResponse(proposal),
+      suppressModelGeneration: true,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1024,6 +857,60 @@ export class SwordGate {
     return {
       mode: 'capture',
       responseMessage: 'What would you like to learn?',
+      suppressModelGeneration: true,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VIEW MODE (Phase 14B)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Handle view mode — retrieve and display existing goals/lessons/progress.
+   */
+  private async handleView(
+    input: SwordGateInput,
+    viewTarget?: ViewTarget,
+    viewRequest?: ViewRequest
+  ): Promise<SwordGateOutput> {
+    // Check if ViewFlow is available
+    if (!this.viewFlow) {
+      return {
+        mode: 'view',
+        responseMessage: '⚠️ View functionality is not available. SparkEngine not configured.',
+        suppressModelGeneration: true,
+      };
+    }
+
+    // Build view request
+    const request: ViewRequest = viewRequest ?? {
+      target: viewTarget ?? 'today',
+      goalId: input.existingGoalId,
+    };
+
+    // Process view request
+    const result = await this.viewFlow.process(input.userId, request);
+
+    if (!result.ok) {
+      // Handle error gracefully
+      console.error('[SWORD_GATE] View error:', result.error);
+      return {
+        mode: 'view',
+        viewTarget: request.target,
+        responseMessage: '❌ Unable to retrieve your learning content. Please try again.',
+        suppressModelGeneration: true,
+      };
+    }
+
+    const viewResult = result.value;
+
+    return {
+      mode: 'view',
+      viewTarget: request.target,
+      viewMessage: viewResult.message,
+      viewHasContent: viewResult.hasContent,
+      viewSuggestedActions: viewResult.suggestedActions,
+      responseMessage: viewResult.message,
       suppressModelGeneration: true,
     };
   }
@@ -1195,153 +1082,21 @@ export class SwordGate {
   }
 
   /**
-   * ★ SYNTHESIZE a goal statement from explore conversation context.
-   * 
-   * When user skips exploration early, we need to extract the most specific
-   * topic/goal from what was discussed, not just fall back to the vague
-   * initial statement like "i want to learn how to code".
-   * 
-   * Priority:
-   *   1. crystallizedGoal (if explore reached that point)
-   *   2. Last candidateGoal (specific goals mentioned)
-   *   3. Most specific interest (e.g., "web development" > "coding")
-   *   4. Initial statement (last resort)
-   */
-  private synthesizeGoalFromExplore(state: ExploreState): string {
-    // 1. Already have a crystallized goal
-    if (state.crystallizedGoal) {
-      return state.crystallizedGoal;
-    }
-
-    // 2. Check candidate goals (specific goals mentioned during conversation)
-    if (state.candidateGoals && state.candidateGoals.length > 0) {
-      // Use the most recent candidate goal
-      const lastGoal = state.candidateGoals[state.candidateGoals.length - 1];
-      if (lastGoal) {
-        return `learn ${lastGoal}`;
-      }
-    }
-
-    // 3. Check interests for specific topics
-    // These are more specific than the initial statement
-    if (state.interests && state.interests.length > 0) {
-      // Find the most specific interest (longer = more specific usually)
-      const sortedInterests = [...state.interests].sort((a, b) => b.length - a.length);
-      const mostSpecific = sortedInterests[0];
-      if (mostSpecific && mostSpecific.length > 3) {
-        return `learn ${mostSpecific}`;
-      }
-    }
-
-    // 4. Try to extract topic from conversation history
-    // Look for patterns like "I want to learn X" or "interested in X"
-    if (state.conversationHistory && state.conversationHistory.length > 0) {
-      const topicFromHistory = this.extractTopicFromHistory(state.conversationHistory);
-      if (topicFromHistory) {
-        return `learn ${topicFromHistory}`;
-      }
-    }
-
-    // 5. Fall back to initial statement
-    return state.initialStatement;
-  }
-
-  /**
-   * Extract the most specific topic mentioned in conversation history.
-   */
-  private extractTopicFromHistory(
-    history: readonly { role: string; content: string }[]
-  ): string | null {
-    // Common specific topics we should recognize
-    const topicPatterns: Array<{ pattern: RegExp; topic: string }> = [
-      // Web development
-      { pattern: /\b(full[- ]?stack|fullstack)\b/i, topic: 'full-stack web development' },
-      { pattern: /\b(front[- ]?end|frontend)\b/i, topic: 'front-end web development' },
-      { pattern: /\b(back[- ]?end|backend)\b/i, topic: 'back-end web development' },
-      { pattern: /\bweb\s*(development|dev)\b/i, topic: 'web development' },
-      // Languages
-      { pattern: /\b(javascript|js)\b/i, topic: 'JavaScript' },
-      { pattern: /\btypescript\b/i, topic: 'TypeScript' },
-      { pattern: /\bpython\b/i, topic: 'Python' },
-      { pattern: /\brust\b/i, topic: 'Rust' },
-      { pattern: /\bjava\b(?!script)/i, topic: 'Java' },
-      { pattern: /\bgo(lang)?\b/i, topic: 'Go' },
-      { pattern: /\bc\+\+\b/i, topic: 'C++' },
-      { pattern: /\bc#\b/i, topic: 'C#' },
-      // Frameworks
-      { pattern: /\breact\b/i, topic: 'React' },
-      { pattern: /\bvue\b/i, topic: 'Vue.js' },
-      { pattern: /\bangular\b/i, topic: 'Angular' },
-      { pattern: /\bnode\.?js\b/i, topic: 'Node.js' },
-      { pattern: /\bexpress\b/i, topic: 'Express.js' },
-      // Data & ML
-      { pattern: /\bmachine\s*learning\b/i, topic: 'machine learning' },
-      { pattern: /\bdata\s*science\b/i, topic: 'data science' },
-      { pattern: /\bAI\b/i, topic: 'artificial intelligence' },
-      // Mobile
-      { pattern: /\bmobile\s*(app|development|dev)\b/i, topic: 'mobile development' },
-      { pattern: /\bios\b/i, topic: 'iOS development' },
-      { pattern: /\bandroid\b/i, topic: 'Android development' },
-      { pattern: /\breact\s*native\b/i, topic: 'React Native' },
-      { pattern: /\bflutter\b/i, topic: 'Flutter' },
-      // Other
-      { pattern: /\bsql\b/i, topic: 'SQL' },
-      { pattern: /\bdatabase\b/i, topic: 'databases' },
-      { pattern: /\bgit\b/i, topic: 'Git' },
-      { pattern: /\bdocker\b/i, topic: 'Docker' },
-      { pattern: /\bkubernetes\b/i, topic: 'Kubernetes' },
-    ];
-
-    // Search user messages for specific topics (most recent first)
-    const userMessages = history
-      .filter(h => h.role === 'user')
-      .map(h => h.content)
-      .reverse();
-
-    for (const message of userMessages) {
-      for (const { pattern, topic } of topicPatterns) {
-        if (pattern.test(message)) {
-          return topic;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /**
    * Build response for proposal.
    */
   private buildProposalResponse(proposal: LessonPlanProposal): string {
-    // Detect if this is a capability-based plan (stages) vs content-based (weeks)
-    const isCapabilityBased = proposal.quests.some(q => q.title.startsWith('Stage'));
-    
     const lines: string[] = [
       `Here's your learning plan for "${proposal.title}":`,
       '',
       `📅 Duration: ${proposal.totalDuration} (${proposal.totalDays} days)`,
-      `📚 ${proposal.quests.length} ${isCapabilityBased ? 'stages' : 'sections'}`,
+      `📚 ${proposal.quests.length} sections covering ${proposal.topicsCovered.length} topics`,
       `🔍 Found ${proposal.resourcesFound} learning resources`,
       '',
+      '**Sections:**',
     ];
 
-    if (isCapabilityBased) {
-      // ★ CAPABILITY-BASED: Show full competence model
-      lines.push('**Your Competence Roadmap:**');
-      lines.push('');
-      
-      for (const quest of proposal.quests) {
-        lines.push(`**${quest.title}** (${quest.estimatedDays} days)`);
-        // Description contains the capability model, show it
-        lines.push(quest.description);
-        lines.push('');
-      }
-    } else {
-      // Standard topic-based format
-      lines.push('**Sections:**');
-      for (const quest of proposal.quests) {
-        lines.push(`${quest.order}. ${quest.title} (${quest.estimatedDays} days)`);
-      }
+    for (const quest of proposal.quests) {
+      lines.push(`${quest.order}. ${quest.title} (${quest.estimatedDays} days)`);
     }
 
     if (proposal.gaps && proposal.gaps.length > 0) {
