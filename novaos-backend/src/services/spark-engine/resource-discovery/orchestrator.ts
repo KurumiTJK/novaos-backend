@@ -32,7 +32,6 @@ import type {
   DisplayURL,
   TopicId,
   ResourceProvider,
-  ResourceContentType,
   RawResourceCandidate,
   EnrichedResource,
   VerifiedResource,
@@ -40,7 +39,6 @@ import type {
   ResourceError,
   QualitySignals,
   ResourceSelectionCriteria,
-  ProviderMetadata,
 } from './types.js';
 import {
   createCanonicalURL,
@@ -576,15 +574,8 @@ export class ResourceDiscoveryOrchestrator {
     const candidates: RawResourceCandidate[] = [];
     
     try {
-      // Build search query from topics
-      const searchTerms = request.topics.map(t => {
-        // Extract human-readable name from topic ID
-        // e.g., "language:rust:ownership" -> "rust ownership"
-        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
-        return topicStr.split(':').slice(1).join(' ');
-      }).join(' ');
-      
-      const query = `${searchTerms} tutorial`;
+      // Build search query - prioritize keywords (main goal) over granular topics
+      const query = this.buildSearchQuery(request, 'tutorial');
       
       logger.info('YouTube API search', { query, maxResults });
       
@@ -699,17 +690,8 @@ export class ResourceDiscoveryOrchestrator {
     const candidates: RawResourceCandidate[] = [];
     
     try {
-      // Build search query from topics
-      const searchTerms = request.topics.map(t => {
-        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
-        // Extract the main topic (e.g., "rust" from "language:rust:basics")
-        const parts = topicStr.split(':');
-        return parts[1] ?? parts[0];
-      });
-      
-      // Deduplicate and join
-      const uniqueTerms = [...new Set(searchTerms)];
-      const query = `${uniqueTerms.join(' ')} tutorial learning`;
+      // Build search query - prioritize keywords (main goal) over granular topics
+      const query = this.buildSearchQuery(request, 'tutorial learning');
       
       logger.info('GitHub API search', { query, maxResults });
       
@@ -775,7 +757,7 @@ export class ResourceDiscoveryOrchestrator {
           metadata: {
             stars: item.stargazers_count,
             forks: item.forks_count,
-            language: item.language ?? undefined,
+            language: item.language,
             topics: item.topics,
             owner: item.owner.login,
             updatedAt: item.updated_at,
@@ -824,13 +806,8 @@ export class ResourceDiscoveryOrchestrator {
     const candidates: RawResourceCandidate[] = [];
     
     try {
-      // Build search query from topics
-      const searchTerms = request.topics.map(t => {
-        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
-        return topicStr.split(':').slice(1).join(' ');
-      }).join(' ');
-      
-      const query = `${searchTerms} tutorial guide documentation`;
+      // Build search query - prioritize keywords (main goal) over granular topics
+      const query = this.buildSearchQuery(request, 'tutorial guide documentation');
       
       logger.info('Tavily API search', { query, maxResults });
       
@@ -1050,7 +1027,7 @@ export class ResourceDiscoveryOrchestrator {
         return 'npm';
       }
       if (hostname.includes('crates.io')) {
-        return 'crates_io';
+        return 'crates';
       }
       if (hostname.includes('pypi.org')) {
         return 'pypi';
@@ -1059,9 +1036,9 @@ export class ResourceDiscoveryOrchestrator {
         return 'mdn';
       }
       
-      return 'unknown';
+      return 'other';
     } catch {
-      return 'unknown';
+      return 'other';
     }
   }
   
@@ -1146,21 +1123,17 @@ export class ResourceDiscoveryOrchestrator {
       // Known source lookup failed, continue without it
     }
     
-    // Handle provider result safely
-    const provider: ResourceProvider = providerResult?.provider ?? 'unknown';
-    const providerId: string | undefined = providerResult?.providerId ?? (providerResult as any)?.id;
-    
     // Calculate confidence
     const confidence = this.calculateClassificationConfidence(
-      { provider, providerId },
+      providerResult,
       topicMatches,
       knownSource
     );
     
     return {
       url: canonical,
-      provider,
-      providerId,
+      provider: providerResult.provider,
+      providerId: providerResult.id,
       topics: topicMatches,
       knownSource,
       confidence,
@@ -1171,7 +1144,7 @@ export class ResourceDiscoveryOrchestrator {
    * Calculate classification confidence.
    */
   private calculateClassificationConfidence(
-    _providerResult: { provider: ResourceProvider; providerId?: string },
+    _providerResult: { provider: ResourceProvider; id: unknown },
     topicMatches: readonly TopicMatchResult[],
     knownSource: KnownSourceMatch | null
   ): number {
@@ -1184,7 +1157,7 @@ export class ResourceDiscoveryOrchestrator {
     
     // Boost for topic matches
     if (topicMatches.length > 0) {
-      const avgTopicConfidence = topicMatches.reduce((sum: number, m) => sum + Number(m.confidence), 0) / topicMatches.length;
+      const avgTopicConfidence = topicMatches.reduce((sum, m) => sum + m.confidence, 0) / topicMatches.length;
       confidence += avgTopicConfidence * 0.2;
     }
     
@@ -1253,13 +1226,13 @@ export class ResourceDiscoveryOrchestrator {
     candidate: RawResourceCandidate & { classification: ClassificationResult }
   ): Promise<EnrichedResource | null> {
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + RESOURCE_TTL.ENRICHMENT_MS);
     
     // Build base enriched resource
     const base: EnrichedResource = {
       id: candidate.id,
       canonicalUrl: candidate.canonicalUrl,
       displayUrl: candidate.displayUrl,
+      url: candidate.canonicalUrl,
       title: candidate.title ?? 'Untitled',
       description: candidate.snippet ?? '',
       source: candidate.source,
@@ -1267,15 +1240,15 @@ export class ResourceDiscoveryOrchestrator {
       providerId: candidate.classification.providerId
         ? String(candidate.classification.providerId)
         : undefined,
-      topicIds: candidate.topicIds,
+      topics: candidate.classification.topics.map(t => ({
+        id: t.topicId,
+        name: t.topicId.split(':').pop() ?? t.topicId,
+      })),
       contentType: this.inferContentType(candidate.classification.provider),
-      format: 'text',
       difficulty: 'beginner',
       estimatedMinutes: this.inferDuration(candidate.classification.provider),
-      metadata: this.createDefaultMetadata(candidate),
       candidateCreatedAt: candidate.createdAt,
       enrichedAt: now,
-      enrichmentExpiresAt: expiresAt,
       qualitySignals: this.computeInitialQuality(candidate),
     };
     
@@ -1283,66 +1256,9 @@ export class ResourceDiscoveryOrchestrator {
   }
   
   /**
-   * Create default metadata based on provider type.
-   */
-  private createDefaultMetadata(
-    candidate: RawResourceCandidate & { classification: ClassificationResult }
-  ): ProviderMetadata {
-    const provider = candidate.classification.provider;
-    const title = candidate.title ?? 'Untitled';
-    const now = new Date();
-    
-    // Safely extract providerId as string
-    const providerId = candidate.classification.providerId;
-    const providerIdStr = typeof providerId === 'string' ? providerId : '';
-    
-    // YouTube gets YouTubeMetadata
-    if (provider === 'youtube') {
-      return {
-        provider: 'youtube',
-        videoId: providerIdStr,
-        channelId: '',
-        channelTitle: '',
-        duration: 0,
-        viewCount: 0,
-        publishedAt: now,
-        hasClosedCaptions: false,
-        isLiveBroadcast: false,
-      };
-    }
-    
-    // GitHub gets GitHubMetadata
-    if (provider === 'github') {
-      return {
-        provider: 'github',
-        owner: '',
-        repo: title,
-        stars: 0,
-        forks: 0,
-        openIssues: 0,
-        watchers: 0,
-        language: undefined,
-        topics: [],
-        createdAt: now,
-        updatedAt: now,
-        isArchived: false,
-        isFork: false,
-        hasReadme: false,
-      };
-    }
-    
-    // Everything else gets WebPageMetadata
-    return {
-      provider: provider as Exclude<ResourceProvider, 'youtube' | 'github'>,
-      title,
-      description: candidate.snippet,
-    };
-  }
-  
-  /**
    * Infer content type from provider.
    */
-  private inferContentType(provider: ResourceProvider): ResourceContentType {
+  private inferContentType(provider: ResourceProvider): string {
     switch (provider) {
       case 'youtube':
         return 'video';
@@ -1350,7 +1266,6 @@ export class ResourceDiscoveryOrchestrator {
         return 'repository';
       case 'npm':
       case 'crates':
-      case 'crates_io':
       case 'pypi':
         return 'documentation';
       case 'stackoverflow':
@@ -1391,9 +1306,7 @@ export class ResourceDiscoveryOrchestrator {
     
     // Boost for known sources
     if (candidate.classification.knownSource) {
-      // Safely check for authority property
-      const ks = candidate.classification.knownSource as { authority?: string };
-      authority = 0.8 + (ks.authority === 'official' ? 0.2 : 0);
+      authority = 0.8 + (candidate.classification.knownSource.authority === 'official' ? 0.2 : 0);
     }
     
     // Use metadata if available
@@ -1409,10 +1322,6 @@ export class ResourceDiscoveryOrchestrator {
       authority,
       completeness: 0.6,
       composite: (popularity + 0.7 + authority + 0.6) / 4,
-      details: {
-        ageInDays: 0,
-        starCount: metadata?.stars,
-      },
     };
   }
   
@@ -1666,6 +1575,70 @@ export class ResourceDiscoveryOrchestrator {
   // Utilities
   // ─────────────────────────────────────────────────────────────────────────────
   
+  /**
+   * Build a sensible search query from a discovery request.
+   * 
+   * Priority:
+   * 1. Use keywords if provided (should contain the main goal like "coding", "python")
+   * 2. Extract main topic from topic IDs (limit to 3-4)
+   * 3. Append the suffix (e.g., "tutorial", "guide")
+   * 
+   * This prevents the garbage queries that happen when all granular topics
+   * are concatenated into one string.
+   */
+  private buildSearchQuery(request: DiscoveryRequest, suffix: string): string {
+    const parts: string[] = [];
+    
+    // Priority 1: Use keywords if provided (these should be the main goal)
+    if (request.keywords && request.keywords.length > 0) {
+      // Keywords are likely the main topic - use them directly
+      parts.push(...request.keywords.slice(0, 3));
+    }
+    
+    // Priority 2: Extract main topics from topic IDs (if no keywords or need more context)
+    if (parts.length === 0 || parts.length < 2) {
+      const topicTerms: string[] = [];
+      
+      for (const t of request.topics) {
+        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
+        
+        // Extract human-readable name from topic ID
+        // e.g., "topic:python" -> "python"
+        // e.g., "language:rust:ownership" -> "rust"
+        const cleaned = topicStr
+          .replace(/^topic:/i, '')
+          .replace(/^language:/i, '')
+          .split(':')[0]
+          .replace(/-/g, ' ')
+          .trim();
+        
+        if (cleaned && cleaned.length > 2 && !topicTerms.includes(cleaned)) {
+          topicTerms.push(cleaned);
+        }
+        
+        // Limit to prevent query bloat
+        if (topicTerms.length >= 4) break;
+      }
+      
+      // Only add topics that aren't already covered by keywords
+      for (const term of topicTerms) {
+        if (!parts.some(p => p.toLowerCase().includes(term.toLowerCase()))) {
+          parts.push(term);
+        }
+        if (parts.length >= 4) break;
+      }
+    }
+    
+    // Fallback if still empty
+    if (parts.length === 0) {
+      parts.push('programming');
+    }
+    
+    // Build final query
+    const mainQuery = parts.join(' ');
+    return `${mainQuery} ${suffix}`.trim();
+  }
+
   /**
    * Batch items for concurrent processing.
    */

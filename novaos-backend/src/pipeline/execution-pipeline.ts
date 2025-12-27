@@ -358,9 +358,13 @@ export class ExecutionPipeline {
       async discover(request) {
         try {
           console.log('[RESOURCE_ADAPTER] Discovering resources for topics:', request.topics);
+          if (request.keywords?.length) {
+            console.log('[RESOURCE_ADAPTER] With keywords:', request.keywords);
+          }
           
           const result = await orchestrator.discover({
             topics: request.topics as TopicId[],
+            keywords: request.keywords as string[] | undefined,
             maxResults: request.maxResults ?? 50,
             includeTypes: request.contentTypes as any[],
           });
@@ -383,13 +387,13 @@ export class ExecutionPipeline {
                 canonicalUrl: r.canonicalUrl,
                 provider: r.providerId ?? 'unknown',
                 contentType: r.contentType,
-                topics: [...r.topicIds] as string[],
+                topics: Array.isArray(r.topicIds) ? [...r.topicIds] as string[] : [],
                 estimatedMinutes: r.estimatedMinutes,
                 difficulty: r.difficulty,
                 quality: r.qualitySignals ? { score: r.qualitySignals.composite } : undefined,
               })),
               topicsCovered: resources
-                .flatMap(r => [...r.topicIds] as string[])
+                .flatMap(r => Array.isArray(r.topicIds) ? [...r.topicIds] as string[] : [])
                 .filter((v, i, a) => a.indexOf(v) === i),
               gaps: [],
             },

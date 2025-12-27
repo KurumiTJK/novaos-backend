@@ -70,6 +70,8 @@ export interface ResourceDiscoveryRequest {
   readonly maxResults?: number;
   readonly contentTypes?: readonly string[];
   readonly difficulty?: string;
+  /** Main search keywords (e.g., the goal: "coding", "python", "cybersecurity") */
+  readonly keywords?: readonly string[];
 }
 
 /**
@@ -892,8 +894,15 @@ export class LessonPlanGenerator {
     let gaps: readonly string[] = [];
 
     if (this.resourceService) {
+      // Extract main goal for keyword search (more effective than granular topics)
+      const mainGoal = inputs.extractedTopic ?? inputs.goalStatement ?? '';
+      const keywords = this.extractKeywords(mainGoal);
+      
+      console.log(`[LESSON_PLAN] Resource discovery with keywords: ${keywords.join(', ')}`);
+      
       const discoveryResult = await this.resourceService.discover({
         topics: topicIds,
+        keywords,
         maxResults: 50,
         difficulty: inputs.userLevel,
       });
@@ -1181,6 +1190,7 @@ export class LessonPlanGenerator {
    * - Artifact: What they must PRODUCE (inspectable, falsifiable)
    * - Challenge: Designed failure to expose and recover from
    * - Transfer: How to apply in new context without scaffolding
+   * - Consideration: What you're gaining vs trading off (only prominent if warning)
    */
   private formatCapabilityDescription(stage: CapabilityStage): string {
     const lines = [
@@ -1189,12 +1199,87 @@ export class LessonPlanGenerator {
       `**Challenge:** ${stage.designedFailure}`,
       `**Transfer:** ${stage.transfer}`,
     ];
+
+    // Add consideration - the tradeoff awareness layer
+    // Only show prominently if there's a warning, otherwise subtle
+    if (stage.consideration) {
+      const c = stage.consideration;
+      
+      if (c.severity === 'warning') {
+        // Warning: prominent, requires acknowledgment
+        lines.push('');
+        lines.push(`**⚠️ Warning:** ${c.tradingOff}`);
+        if (c.checkpoint) {
+          lines.push(`_${c.checkpoint}_`);
+        }
+      } else if (c.severity === 'caution') {
+        // Caution: visible but not alarming
+        lines.push('');
+        lines.push(`_Note: You're gaining ${c.gaining.toLowerCase()}, but trading off ${c.tradingOff.toLowerCase()}._`);
+      }
+      // 'info' severity: don't show, it's obvious
+    }
+
     return lines.join('\n');
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // HELPERS
   // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Extract main keywords from a goal statement for resource discovery.
+   * 
+   * Examples:
+   * - "I want to learn coding" → ["coding"]
+   * - "learn python for data science" → ["python", "data science"]
+   * - "technical aspects like firewalls" → ["firewalls", "security"]
+   */
+  private extractKeywords(goal: string): string[] {
+    const keywords: string[] = [];
+    const normalized = goal.toLowerCase().trim();
+    
+    // Remove common filler words
+    const cleaned = normalized
+      .replace(/^(i want to|i'd like to|help me|teach me|learn|study|understand)\s*/gi, '')
+      .replace(/^(how to|about)\s*/gi, '')
+      .replace(/^(more about|the basics of|basics of)\s*/gi, '')
+      .trim();
+    
+    // Check for known programming languages/technologies
+    const knownTerms = [
+      'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'c++', 'c#',
+      'react', 'vue', 'angular', 'node', 'nodejs', 'express',
+      'sql', 'database', 'mongodb', 'postgresql', 'mysql',
+      'docker', 'kubernetes', 'aws', 'azure', 'gcp', 'devops',
+      'machine learning', 'ml', 'ai', 'artificial intelligence', 'data science',
+      'web development', 'frontend', 'backend', 'full stack', 'fullstack',
+      'cybersecurity', 'security', 'hacking', 'penetration testing',
+      'coding', 'programming', 'software development',
+      'firewalls', 'networking', 'linux', 'git', 'api',
+    ];
+    
+    // First, extract any known terms
+    for (const term of knownTerms) {
+      if (cleaned.includes(term)) {
+        keywords.push(term);
+        if (keywords.length >= 3) break;
+      }
+    }
+    
+    // If no known terms, use the first few meaningful words
+    if (keywords.length === 0) {
+      const words = cleaned.split(/\s+/).filter(w => w.length > 2);
+      keywords.push(...words.slice(0, 3));
+    }
+    
+    // Ensure we have at least something
+    if (keywords.length === 0) {
+      keywords.push('programming');
+    }
+    
+    return [...new Set(keywords)]; // Deduplicate
+  }
 
   /**
    * Group curriculum days into weekly quests.

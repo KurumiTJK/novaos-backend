@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAPABILITY GENERATOR — Dynamic Competence-Based Learning Progressions
+// CAPABILITY GENERATOR — Dynamic Competence + Agency Progressions
 // NovaOS Gates — Phase 14: SwordGate
 // ═══════════════════════════════════════════════════════════════════════════════
 //
@@ -12,12 +12,22 @@
 //   4. DESIGN    — Build independently from requirements
 //   5. SHIP      — Deploy and defend decisions
 //
-// Each stage defines:
-//   - Capability: What the learner CAN DO (verb-based)
-//   - Artifact: Inspectable, falsifiable output that proves competence
-//   - Designed Failure: Specific mistake to make and recover from
-//   - Transfer: Apply skill in new context without scaffolding
-//   - Topics: Subtopics for resource discovery
+// THE AGENCY LAYER (What Makes This Different)
+// ─────────────────────────────────────────────
+// Every stage includes a DECISION POINT — a moment of judgment where:
+//   - Multiple options are plausible
+//   - Each has real tradeoffs (not strawmen)
+//   - There is NO correct answer
+//   - The learner must CHOOSE and DEFEND
+//
+// The diagnostic:
+//   If a learner never says "I chose this because the alternatives were worse,"
+//   the plan isn't robust yet.
+//
+// This is what separates:
+//   training (compliance) → thinking (agency)
+//   execution → adaptation
+//   following rails → owning consequences
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -29,31 +39,79 @@ import { ok, err, appError } from '../../types/result.js';
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * A single stage in the capability-based progression.
+ * Tradeoff severity — determines visibility.
+ * 
+ * - 'info': Subtle mention, learner probably already considered it
+ * - 'caution': Worth noting, easy to overlook
+ * - 'warning': Significant tradeoff, could derail progress if ignored
  */
-export interface CapabilityStage {
-  title: string;
-  capability: string;
-  artifact: string;
-  designedFailure: string;
-  transfer: string;
-  topics: string[];
+export type TradeoffSeverity = 'info' | 'caution' | 'warning';
+
+/**
+ * A consideration — what the learner gains and trades off by pursuing this stage.
+ * 
+ * NOT a menu of choices. Instead:
+ * - Surfaces what they're implicitly gaining
+ * - Warns about what they're implicitly trading off
+ * - Only demands attention when severity is 'warning'
+ * 
+ * Think of it as the Shield role: protect from blind spots without being annoying.
+ */
+export interface Consideration {
+  /** What the learner gains by completing this stage */
+  gaining: string;
+  
+  /** What the learner is trading off or deferring */
+  tradingOff: string;
+  
+  /** How significant is this tradeoff? */
+  severity: TradeoffSeverity;
+  
+  /** 
+   * Only shown if severity is 'warning'.
+   * A prompt to make the learner consciously acknowledge the tradeoff.
+   */
+  checkpoint?: string;
 }
 
 /**
- * The universal competence phases.
+ * A single stage in the capability-based progression.
+ * 
+ * Now includes CONSIDERATION — a tradeoff-aware layer that:
+ * - Shows what you're gaining vs trading off
+ * - Only becomes prominent when there's a significant risk
+ * - Lets the learner decide if the tradeoff is acceptable for their situation
  */
-export type CompetencePhase = 'reproduce' | 'modify' | 'diagnose' | 'design' | 'ship';
-
-/**
- * Framework definition for each competence phase.
- */
-interface PhaseDefinition {
-  phase: CompetencePhase;
-  order: number;
-  verb: string;
-  focus: string;
-  prompt: string;
+export interface CapabilityStage {
+  /** Short title (2-5 words) */
+  title: string;
+  
+  /** What the learner CAN DO after (verb-based, verifiable) */
+  capability: string;
+  
+  /** Inspectable, falsifiable output that proves competence */
+  artifact: string;
+  
+  /** Specific mistake to make and recover from */
+  designedFailure: string;
+  
+  /** Apply skill in new context without scaffolding */
+  transfer: string;
+  
+  /** Subtopics for resource discovery */
+  topics: string[];
+  
+  /**
+   * CONSIDERATION — The tradeoff awareness layer.
+   * 
+   * Not a forced choice. Instead:
+   * - "By doing this, you're gaining X"
+   * - "You're trading off Y"
+   * - If Y is significant: "Is that acceptable for your situation?"
+   * 
+   * Only demands attention when the tradeoff could cause real problems.
+   */
+  consideration: Consideration;
 }
 
 /**
@@ -76,93 +134,68 @@ export interface CapabilityGeneratorConfig {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// COMPETENCE FRAMEWORK
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * The universal 5-stage competence model.
- * This framework applies to ANY skill or topic.
- */
-const COMPETENCE_FRAMEWORK: readonly PhaseDefinition[] = [
-  {
-    phase: 'reproduce',
-    order: 1,
-    verb: 'Create',
-    focus: 'basic outcome unaided',
-    prompt: 'The learner creates the most fundamental output in this domain without step-by-step guidance. Focus on the "hello world" equivalent that proves they can produce SOMETHING real.',
-  },
-  {
-    phase: 'modify',
-    order: 2,
-    verb: 'Adapt',
-    focus: 'existing work under constraints',
-    prompt: 'The learner takes working examples and modifies them to meet new requirements. Focus on understanding structure well enough to change it purposefully.',
-  },
-  {
-    phase: 'diagnose',
-    order: 3,
-    verb: 'Debug',
-    focus: 'failures and edge cases',
-    prompt: 'The learner identifies what went wrong and fixes it. Focus on building mental models of how things break and systematic troubleshooting.',
-  },
-  {
-    phase: 'design',
-    order: 4,
-    verb: 'Architect',
-    focus: 'solutions from requirements',
-    prompt: 'The learner builds something new from scratch given only requirements, not instructions. Focus on making decisions and trade-offs independently.',
-  },
-  {
-    phase: 'ship',
-    order: 5,
-    verb: 'Deploy',
-    focus: 'to real users and defend decisions',
-    prompt: 'The learner puts work in front of others and handles feedback. Focus on documentation, handoff, and explaining/defending choices.',
-  },
-];
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// LLM PROMPT
+// LLM PROMPTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Build the system prompt for capability generation.
  */
 function buildSystemPrompt(): string {
-  return `You are an expert instructional designer who creates capability-based learning progressions.
+  return `You are an expert instructional designer who creates learning progressions with built-in tradeoff awareness.
 
-Your job is to generate a 5-stage learning path that transforms someone from novice to competent practitioner.
+Your job is to generate a 5-stage learning path that:
+1. Develops real capability (what learners CAN DO)
+2. Surfaces what they're gaining AND trading off at each stage
+3. Warns them when a tradeoff is significant enough to matter
 
-CRITICAL PRINCIPLES:
-1. CAPABILITY over content — Define what learners CAN DO, not what they "know"
-2. ARTIFACT over assessment — Every stage produces inspectable, falsifiable work
-3. DESIGNED FAILURE — Each stage includes a specific mistake to make and recover from
-4. TRANSFER REQUIRED — Each stage requires applying skills in a new context
-5. IMMEDIATE APPLICATION — No "learn now, apply later" — practice from day one
+THE CONSIDERATION LAYER (Key Innovation)
+Each stage should surface:
+- What the learner GAINS by completing this stage
+- What they're TRADING OFF or deferring
+- How significant the tradeoff is (info/caution/warning)
+- If 'warning': a checkpoint question to make them consciously decide
 
-The 5 stages follow the universal competence model:
-1. REPRODUCE: Create the basic outcome unaided (the "hello world")
-2. MODIFY: Adapt existing work under new constraints
+This is NOT a menu of choices. It's awareness of implicit tradeoffs.
+
+Think of it as a Shield: protect from blind spots without being annoying.
+- 'info': Already obvious, just noting it
+- 'caution': Easy to overlook, worth mentioning
+- 'warning': Could derail progress if ignored, needs conscious acknowledgment
+
+SEVERITY GUIDELINES:
+- 'info': The tradeoff is minor or temporary (e.g., "trading off speed for understanding")
+- 'caution': The tradeoff could cause friction later (e.g., "skipping tests now means debugging later")
+- 'warning': The tradeoff could fundamentally undermine the goal (e.g., "building without security basics")
+
+The 5 stages:
+1. REPRODUCE: Create basic outcome unaided
+2. MODIFY: Adapt existing work under constraints
 3. DIAGNOSE: Find and fix failures systematically
 4. DESIGN: Build from requirements, not instructions
-5. SHIP: Deploy to real users and defend your decisions
+5. SHIP: Deploy to users and handle feedback
 
-OUTPUT FORMAT:
-Return a JSON array with exactly 5 objects, one per stage. Each object must have:
+OUTPUT FORMAT (JSON array with exactly 5 objects):
 {
   "title": "Short title (2-5 words)",
-  "capability": "What the learner can DO after this stage (verb-based, specific)",
-  "artifact": "The concrete, inspectable output that proves competence",
-  "designedFailure": "A specific mistake they will make and must recover from",
-  "transfer": "How they apply this skill in a different context",
-  "topics": ["subtopic1", "subtopic2", "subtopic3"] // 3-5 topics for resource discovery
+  "capability": "What the learner can DO (verb-based, verifiable)",
+  "artifact": "Inspectable output that proves competence (must be falsifiable)",
+  "designedFailure": "Specific mistake to make and recover from",
+  "transfer": "Apply skill in different context without scaffolding",
+  "topics": ["subtopic1", "subtopic2", "subtopic3"],
+  "consideration": {
+    "gaining": "What completing this stage provides",
+    "tradingOff": "What is deferred, skipped, or sacrificed",
+    "severity": "info" | "caution" | "warning",
+    "checkpoint": "Only if severity is 'warning': Question to confirm tradeoff is acceptable"
+  }
 }
 
 QUALITY CRITERIA:
-- Capabilities must be VERIFIABLE — can someone observe if the learner has it?
-- Artifacts must be FALSIFIABLE — can it be wrong? If not, it's not a real artifact.
-- Failures must be SPECIFIC — not "make a mistake" but "forget to handle the null case"
-- Transfers must require ADAPTATION — not just repetition in new context`;
+- Capabilities must be VERIFIABLE
+- Artifacts must be FALSIFIABLE
+- Tradeoffs must be REAL (not theoretical)
+- Severity must be HONEST (don't inflate to 'warning' for minor things)
+- Checkpoints only for genuine risks`;
 }
 
 /**
@@ -170,27 +203,32 @@ QUALITY CRITERIA:
  */
 function buildUserPrompt(topic: string, level: UserLevel, durationDays: number): string {
   const levelContext = {
-    beginner: 'The learner is a complete beginner with no prior experience in this area.',
-    intermediate: 'The learner has some familiarity but needs to build solid foundations.',
-    advanced: 'The learner has experience but wants to fill gaps and reach mastery.',
+    beginner: 'Complete beginner with no prior experience.',
+    intermediate: 'Some familiarity, building solid foundations.',
+    advanced: 'Has experience, filling gaps toward mastery.',
   };
 
-  return `Generate a 5-stage capability-based learning progression for:
+  return `Generate a 5-stage capability progression with tradeoff awareness for:
 
 TOPIC: ${topic}
 LEVEL: ${level} — ${levelContext[level]}
-DURATION: ${durationDays} days total (roughly ${Math.ceil(durationDays / 5)} days per stage)
+DURATION: ${durationDays} days (~${Math.ceil(durationDays / 5)} days per stage)
 
-Remember:
-- Stage 1 (Reproduce): The simplest thing that counts as "doing" this skill
-- Stage 2 (Modify): Take something working and change it purposefully  
-- Stage 3 (Diagnose): Fix something broken, understand failure modes
-- Stage 4 (Design): Build something new from just requirements
-- Stage 5 (Ship): Put it in front of others, handle feedback, document
+For each stage, include a "consideration" that surfaces:
+1. What the learner GAINS by completing this stage
+2. What they're TRADING OFF (deferring, skipping, or sacrificing)
+3. Severity: 'info' (minor), 'caution' (worth noting), or 'warning' (could cause problems)
+4. If 'warning': a checkpoint question to confirm the tradeoff is acceptable
 
-Each stage should be achievable in roughly ${Math.ceil(durationDays / 5)} days at the ${level} level.
+SEVERITY GUIDELINES:
+- 'info': Tradeoff is obvious or temporary
+- 'caution': Easy to overlook, could cause friction later
+- 'warning': Could fundamentally undermine the learning goal if ignored
 
-Return ONLY the JSON array, no markdown, no explanation.`;
+Be honest about severity. Most stages should be 'info' or 'caution'.
+Only use 'warning' when skipping something could genuinely derail the learner.
+
+Return ONLY the JSON array. No markdown. No explanation.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -199,6 +237,9 @@ Return ONLY the JSON array, no markdown, no explanation.`;
 
 /**
  * Generates capability-based learning progressions dynamically using LLM.
+ * 
+ * Key innovation: Every stage includes a DECISION POINT that forces
+ * the learner to make judgment calls under uncertainty.
  */
 export class CapabilityGenerator {
   private readonly config: Required<CapabilityGeneratorConfig>;
@@ -222,7 +263,6 @@ export class CapabilityGenerator {
     level: UserLevel = 'beginner',
     durationDays: number = 30
   ): AsyncAppResult<readonly CapabilityStage[]> {
-    // Normalize topic for caching
     const normalizedTopic = this.normalizeTopic(topic);
     const cacheKey = `${normalizedTopic}:${level}:${durationDays}`;
 
@@ -239,12 +279,11 @@ export class CapabilityGenerator {
     const result = await this.generateViaLLM(normalizedTopic, level, durationDays);
     
     if (result.ok) {
-      // Cache successful result
       this.cache.set(cacheKey, {
         stages: result.value as CapabilityStage[],
         expiresAt: Date.now() + this.config.cacheTtlSeconds * 1000,
       });
-      console.log(`[CAPABILITY_GEN] Generated ${result.value.length} stages for: "${normalizedTopic}"`);
+      console.log(`[CAPABILITY_GEN] Generated ${result.value.length} stages with tradeoff considerations`);
     }
 
     return result;
@@ -283,7 +322,7 @@ export class CapabilityGenerator {
               { role: 'user', content: userPrompt },
             ],
             temperature: 0.7,
-            max_tokens: 2000,
+            max_tokens: 4000,
           }),
         });
 
@@ -301,11 +340,9 @@ export class CapabilityGenerator {
           throw new Error('Empty response from OpenAI');
         }
 
-        // Parse JSON response
         const stages = this.parseResponse(content);
-        
-        // Validate stages
         const validated = this.validateStages(stages);
+        
         if (!validated.ok) {
           throw new Error(validated.error.message);
         }
@@ -317,13 +354,11 @@ export class CapabilityGenerator {
         console.warn(`[CAPABILITY_GEN] Attempt ${attempt + 1} failed:`, lastError.message);
         
         if (attempt < this.config.maxRetries) {
-          // Wait before retry (exponential backoff)
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
         }
       }
     }
 
-    // All retries failed, use fallback
     console.warn('[CAPABILITY_GEN] All LLM attempts failed, using fallback');
     return ok(this.generateFallback(topic, level, durationDays));
   }
@@ -332,7 +367,6 @@ export class CapabilityGenerator {
    * Parse LLM response into stages.
    */
   private parseResponse(content: string): unknown[] {
-    // Clean up response (remove markdown code blocks if present)
     let cleaned = content.trim();
     if (cleaned.startsWith('```json')) {
       cleaned = cleaned.slice(7);
@@ -342,13 +376,11 @@ export class CapabilityGenerator {
     if (cleaned.endsWith('```')) {
       cleaned = cleaned.slice(0, -3);
     }
-    cleaned = cleaned.trim();
-
-    return JSON.parse(cleaned);
+    return JSON.parse(cleaned.trim());
   }
 
   /**
-   * Validate parsed stages.
+   * Validate parsed stages including considerations.
    */
   private validateStages(stages: unknown[]): { ok: true; value: CapabilityStage[] } | { ok: false; error: { message: string } } {
     if (!Array.isArray(stages)) {
@@ -364,6 +396,7 @@ export class CapabilityGenerator {
     for (let i = 0; i < stages.length; i++) {
       const stage = stages[i] as Record<string, unknown>;
       
+      // Validate basic fields
       if (typeof stage.title !== 'string' || !stage.title) {
         return { ok: false, error: { message: `Stage ${i + 1}: missing title` } };
       }
@@ -383,13 +416,49 @@ export class CapabilityGenerator {
         return { ok: false, error: { message: `Stage ${i + 1}: missing or empty topics` } };
       }
 
+      // Validate or generate consideration
+      const cons = stage.consideration as Record<string, unknown> | undefined;
+      let consideration: Consideration;
+      
+      if (!cons || typeof cons !== 'object') {
+        consideration = this.getUniversalConsideration(i);
+      } else {
+        if (typeof cons.gaining !== 'string' || !cons.gaining) {
+          return { ok: false, error: { message: `Stage ${i + 1}: consideration missing 'gaining'` } };
+        }
+        if (typeof cons.tradingOff !== 'string' || !cons.tradingOff) {
+          return { ok: false, error: { message: `Stage ${i + 1}: consideration missing 'tradingOff'` } };
+        }
+        
+        // Validate severity
+        const severity = cons.severity as string;
+        if (!['info', 'caution', 'warning'].includes(severity)) {
+          // Default to 'info' if invalid
+          console.warn(`[CAPABILITY_GEN] Stage ${i + 1}: invalid severity '${severity}', defaulting to 'info'`);
+        }
+        
+        const validSeverity: TradeoffSeverity = 
+          severity === 'warning' ? 'warning' :
+          severity === 'caution' ? 'caution' : 'info';
+
+        consideration = {
+          gaining: cons.gaining as string,
+          tradingOff: cons.tradingOff as string,
+          severity: validSeverity,
+          checkpoint: validSeverity === 'warning' && typeof cons.checkpoint === 'string' 
+            ? cons.checkpoint 
+            : undefined,
+        };
+      }
+
       validated.push({
-        title: stage.title,
-        capability: stage.capability,
-        artifact: stage.artifact,
-        designedFailure: stage.designedFailure,
-        transfer: stage.transfer,
-        topics: stage.topics.map(String),
+        title: stage.title as string,
+        capability: stage.capability as string,
+        artifact: stage.artifact as string,
+        designedFailure: stage.designedFailure as string,
+        transfer: stage.transfer as string,
+        topics: (stage.topics as unknown[]).map(String),
+        consideration,
       });
     }
 
@@ -397,53 +466,100 @@ export class CapabilityGenerator {
   }
 
   /**
-   * Generate fallback progression when LLM is unavailable.
-   * Uses the universal framework with topic-specific placeholders.
+   * Universal considerations for each stage phase.
+   * These surface common tradeoffs across all learning domains.
    */
-  private generateFallback(topic: string, level: UserLevel, durationDays: number): CapabilityStage[] {
-    const daysPerStage = Math.ceil(durationDays / 5);
+  private getUniversalConsideration(stageIndex: number): Consideration {
+    const universalConsiderations: Consideration[] = [
+      // Stage 1: REPRODUCE
+      {
+        gaining: 'Ability to produce basic output independently',
+        tradingOff: 'Depth of understanding — you\'re learning enough to DO, not everything',
+        severity: 'info',
+      },
+      // Stage 2: MODIFY
+      {
+        gaining: 'Flexibility to adapt existing work to new requirements',
+        tradingOff: 'Time spent on original creation — building on others\' foundations',
+        severity: 'info',
+      },
+      // Stage 3: DIAGNOSE
+      {
+        gaining: 'Systematic problem-solving skills',
+        tradingOff: 'Speed — debugging properly takes longer than guessing',
+        severity: 'caution',
+        checkpoint: undefined,
+      },
+      // Stage 4: DESIGN
+      {
+        gaining: 'Independence — building from requirements, not instructions',
+        tradingOff: 'Safety net of step-by-step guidance',
+        severity: 'caution',
+        checkpoint: undefined,
+      },
+      // Stage 5: SHIP
+      {
+        gaining: 'Real-world validation and feedback loops',
+        tradingOff: 'Control — others will judge and critique your work',
+        severity: 'info',
+      },
+    ];
+
+    return universalConsiderations[stageIndex] ?? universalConsiderations[0]!;
+  }
+
+  /**
+   * Generate fallback progression when LLM is unavailable.
+   */
+  private generateFallback(topic: string, _level: UserLevel, _durationDays: number): CapabilityStage[] {
     const topicName = this.formatTopicName(topic);
+    const t = topic.toLowerCase();
 
     return [
       {
         title: `Your First ${topicName} Output`,
-        capability: `Create a basic ${topicName.toLowerCase()} deliverable from scratch without step-by-step guidance`,
-        artifact: `A working example that demonstrates fundamental ${topicName.toLowerCase()} concepts`,
+        capability: `Create a basic ${t} deliverable from scratch without step-by-step guidance`,
+        artifact: `A working example that demonstrates fundamental ${t} concepts`,
         designedFailure: `Missing a critical step that causes the output to fail in an obvious way`,
         transfer: `Create the same type of output for a different use case or context`,
-        topics: [topic.toLowerCase(), 'basics', 'fundamentals', 'getting-started'],
+        topics: [t, 'basics', 'fundamentals', 'getting-started'],
+        consideration: this.getUniversalConsideration(0),
       },
       {
         title: `Modify & Adapt`,
-        capability: `Take existing ${topicName.toLowerCase()} work and modify it to meet new requirements`,
-        artifact: `An adapted version of an example with documented changes and rationale`,
+        capability: `Take existing ${t} work and modify it to meet new requirements`,
+        artifact: `An adapted version with documented changes and rationale`,
         designedFailure: `Breaking existing functionality while adding new features`,
         transfer: `Apply the same modification pattern to a completely different starting point`,
-        topics: [topic.toLowerCase(), 'customization', 'adaptation', 'requirements'],
+        topics: [t, 'customization', 'adaptation', 'requirements'],
+        consideration: this.getUniversalConsideration(1),
       },
       {
         title: `Debug & Diagnose`,
-        capability: `Identify and fix problems in ${topicName.toLowerCase()} work systematically`,
+        capability: `Identify and fix problems in ${t} work systematically`,
         artifact: `A debugging log showing problem identification, investigation, and resolution`,
         designedFailure: `Fixing a symptom instead of the root cause`,
-        transfer: `Debug a problem in an unfamiliar codebase or context`,
-        topics: [topic.toLowerCase(), 'debugging', 'troubleshooting', 'problem-solving'],
+        transfer: `Debug a problem in an unfamiliar context`,
+        topics: [t, 'debugging', 'troubleshooting', 'problem-solving'],
+        consideration: this.getUniversalConsideration(2),
       },
       {
         title: `Design From Requirements`,
-        capability: `Build a ${topicName.toLowerCase()} solution given only requirements, not instructions`,
+        capability: `Build a ${t} solution given only requirements, not instructions`,
         artifact: `A complete solution with design decisions documented`,
         designedFailure: `Over-engineering or under-engineering for the actual requirements`,
         transfer: `Design a solution for requirements in a domain you're less familiar with`,
-        topics: [topic.toLowerCase(), 'design', 'architecture', 'decision-making'],
+        topics: [t, 'design', 'architecture', 'decision-making'],
+        consideration: this.getUniversalConsideration(3),
       },
       {
         title: `Ship & Defend`,
-        capability: `Deploy ${topicName.toLowerCase()} work to real users and handle feedback`,
-        artifact: `A deployed solution with documentation and a record of feedback addressed`,
+        capability: `Deploy ${t} work to real users and handle feedback`,
+        artifact: `A deployed solution with documentation and record of feedback addressed`,
         designedFailure: `Receiving critical feedback you didn't anticipate`,
-        transfer: `Help someone else ship their work and handle their feedback process`,
-        topics: [topic.toLowerCase(), 'deployment', 'documentation', 'feedback', 'iteration'],
+        transfer: `Help someone else ship their work and handle their feedback`,
+        topics: [t, 'deployment', 'documentation', 'feedback', 'iteration'],
+        consideration: this.getUniversalConsideration(4),
       },
     ];
   }
@@ -473,16 +589,10 @@ export class CapabilityGenerator {
       .join(' ');
   }
 
-  /**
-   * Clear the cache (useful for testing).
-   */
   clearCache(): void {
     this.cache.clear();
   }
 
-  /**
-   * Get cache stats (useful for monitoring).
-   */
   getCacheStats(): { size: number; entries: string[] } {
     return {
       size: this.cache.size,
@@ -492,23 +602,13 @@ export class CapabilityGenerator {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FACTORY
+// FACTORY & UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Create a capability generator with default configuration.
- */
 export function createCapabilityGenerator(config?: CapabilityGeneratorConfig): CapabilityGenerator {
   return new CapabilityGenerator(config);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EXTRACT TOPICS FOR RESOURCE DISCOVERY
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Extract topic IDs from capability stages for resource discovery.
- */
 export function extractTopicsFromStages(stages: readonly CapabilityStage[]): string[] {
   const allTopics = stages.flatMap(stage => stage.topics);
   const unique = [...new Set(allTopics)];
